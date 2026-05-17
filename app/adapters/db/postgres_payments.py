@@ -91,9 +91,31 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
         format="text",
     )
     await conn.execute("SET TIME ZONE 'UTC'")
-    # search_path: payments primeiro, public como fallback (FKs cross-schema
-    # como `REFERENCES public.users(id)` ainda funcionam).
-    await conn.execute("SET search_path TO payments, public")
+
+
+async def _setup_connection(conn: asyncpg.Connection) -> None:
+    """Roda em cada checkout do pool (não só na criação da conexão).
+
+    Garante que `payments` e `public` estejam no search_path. Crítico porque:
+      1. asyncpg.Pool chama `connection.reset()` entre checkouts, que limpa
+         search_path setado em `init` — apenas o `setup` callback sobrevive.
+      2. `vector` (pgvector) e `vector_cosine_ops` operator class estão em
+         `public`. Sem public no path, `embedding vector(1536)` e CREATE
+         INDEX ivfflat falham.
+      3. Migrations qualificam `payments.<table>` mas FKs usam `users` sem
+         prefix — schema isolado de teste tem `users`, ou `public` tem.
+    """
+    sp = await conn.fetchval("SHOW search_path")
+    parts = [p.strip().strip('"') for p in sp.split(',')]
+    parts_lower = [p.lower() for p in parts]
+    suffix_parts = []
+    if 'payments' not in parts_lower:
+        suffix_parts.append('payments')
+    if 'public' not in parts_lower:
+        suffix_parts.append('public')
+    if suffix_parts:
+        new_sp = f"{sp}, {', '.join(suffix_parts)}"
+        await conn.execute(f"SET search_path TO {new_sp}")
 
 
 async def get_payments_pool() -> asyncpg.Pool:
@@ -113,6 +135,7 @@ async def get_payments_pool() -> asyncpg.Pool:
             command_timeout=s.payments_pool_command_timeout,
             statement_cache_size=1024,
             init=_init_connection,
+            setup=_setup_connection,                       # roda em cada checkout
         )
         return _pool
 

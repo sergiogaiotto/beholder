@@ -15,7 +15,12 @@
 -- ============================================================
 
 CREATE SCHEMA IF NOT EXISTS payments;
-CREATE EXTENSION IF NOT EXISTS vector;
+-- pgvector instalado SEMPRE em `public` (não no search_path corrente). Razão:
+-- testes usam schemas isolados que podem ser dropados (CASCADE). Se a extension
+-- cair junto, pg_extension fica órfão e migrations futuras veem `type vector
+-- not found` mesmo com IF NOT EXISTS. Em `public`, persiste — e public é
+-- sempre o fallback do search_path, então `vector(1536)` resolve normalmente.
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 
 -- ============================================================
 -- IngestionRun — rastreabilidade de cargas de XLSX/TXT/PDF
@@ -40,7 +45,7 @@ CREATE TABLE IF NOT EXISTS payments.ingestion_run (
     started_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     finished_at              TIMESTAMPTZ,
     error_message            TEXT,
-    triggered_by_user_id     UUID REFERENCES public.users(id),
+    triggered_by_user_id     UUID REFERENCES users(id),
     metadata                 JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 CREATE INDEX IF NOT EXISTS idx_ingestion_status_started
