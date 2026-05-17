@@ -22,10 +22,13 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # [v1.1 Fase 0] Trocado de postgres:16-alpine para pgvector/pgvector:pg16
+    # — necessário para a extension `vector` usada por payments.contract_clause
+    # (embeddings) e analytics R7. Mesma versão major do PG (16), totalmente
+    # compatível com volumes existentes.
+    image: pgvector/pgvector:pg16
     container_name: beholder-postgres-dev
     environment:
-      # Credenciais FIXAS para o Postgres interno do compose dev.
       POSTGRES_USER: beholder
       POSTGRES_PASSWORD: beholder
       POSTGRES_DB: beholder
@@ -43,14 +46,50 @@ services:
       - "-c"
       - "random_page_cost=1.1"
     ports:
-      # APP_HOST_PORT só ajusta a porta exposta no host se 5432 já estiver
-      # em uso (ex.: você roda um Postgres nativo na máquina). O container
-      # mesmo sempre escuta em 5432 internamente.
       - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - beholder_pgdata_dev:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U beholder -d beholder"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # [Fase 0] Redis — broker do dramatiq (worker assíncrono pra extração PDF
+  # + reconciliação batch). Single-node em dev; em prod usar cluster.
+  redis:
+    image: redis:7-alpine
+    container_name: beholder-redis-dev
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    volumes:
+      - beholder_redisdata_dev:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # [Fase 0] MinIO — S3-compatible local. DocumentStore S3 adapter usa este em
+  # dev (`S3_ENDPOINT_URL=http://minio:9000`); em prod aponta pra AWS S3 real.
+  # Console web: http://localhost:9001 (login: beholder/beholder123).
+  minio:
+    image: minio/minio:latest
+    container_name: beholder-minio-dev
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: beholder
+      MINIO_ROOT_PASSWORD: beholder123
+    ports:
+      - "${MINIO_HOST_PORT:-9000}:9000"     # API S3
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"  # Console web
+    volumes:
+      - beholder_miniodata_dev:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -62,40 +101,82 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
-      # FIXO: aponta para o serviço `postgres` deste compose.
       DATABASE_URL: postgresql://beholder:beholder@postgres:5432/beholder
       APP_SECRET_KEY: dev-only-not-a-secret-change-in-prod
       APP_ENV: development
       PG_POOL_MIN_SIZE: "5"
       PG_POOL_MAX_SIZE: "20"
-      # Reload do uvicorn já cobre hot-reload — 1 worker é suficiente em dev.
+      # [Fase 0] Pool dedicado payments
+      PAYMENTS_POOL_MIN_SIZE: "2"
+      PAYMENTS_POOL_MAX_SIZE: "10"
+      # [Fase 0] Redis + S3/MinIO + DocumentStore
+      REDIS_URL: redis://redis:6379/0
+      DOCUMENT_STORE_MODE: s3
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: beholder
+      S3_SECRET_KEY: beholder123
+      S3_BUCKET: beholder-documents
+      S3_REGION: us-east-1
       UVICORN_WORKERS: "1"
-      # LLMs — opt-in via `.env` da raiz (Compose carrega automaticamente).
-      # Sem a var no .env, `${VAR:-}` injeta string vazia → adapter cai em modo
-      # mock. Stack do Beholder: ClaroHub (on-prem, OpenAI-compatible) +
-      # Maritaca (cloud Sabiá-4).
       CLARO_HUB_API_KEY: ${CLARO_HUB_API_KEY:-}
       CLARO_HUB_ENDPOINT: ${CLARO_HUB_ENDPOINT:-https://hub-gpus.claro.com.br/gpt20}
       CLARO_HUB_MODEL: ${CLARO_HUB_MODEL:-openai/gpt-oss-20b}
       MARITACA_API_KEY: ${MARITACA_API_KEY:-}
       MARITACA_MODEL: ${MARITACA_MODEL:-sabia-4}
       MARITACA_BASE_URL: ${MARITACA_BASE_URL:-https://chat.maritaca.ai/api}
-      # Proxy corporativo — obrigatório para ClaroHub a partir de redes Claro.
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
     ports:
       - "${APP_HOST_PORT:-8100}:8000"
     volumes:
-      # Bind-mount do código pra hot-reload. Skills moram em /app/app/skills,
-      # então qualquer arquivo criado via UI também aparece no repo local
-      # (útil em dev, diferente do prod que usa volume nomeado).
       - ./app:/app/app
     restart: unless-stopped
-    # --reload sobrescreve o entrypoint padrão (uvicorn --workers N). O seed
-    # de skills do entrypoint não precisa rodar aqui porque o bind-mount já
-    # traz os skills do repo.
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # [Fase 0] Worker dramatiq — processa jobs assíncronos (extração PDF,
+  # reconciliação batch). Mesma image do beholder (dependências compartilhadas),
+  # apenas comando diferente. Em prod escala-se horizontalmente.
+  worker:
+    build: .
+    container_name: beholder-worker-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://beholder:beholder@postgres:5432/beholder
+      APP_SECRET_KEY: dev-only-not-a-secret-change-in-prod
+      APP_ENV: development
+      PG_POOL_MIN_SIZE: "2"
+      PG_POOL_MAX_SIZE: "5"
+      PAYMENTS_POOL_MIN_SIZE: "2"
+      PAYMENTS_POOL_MAX_SIZE: "8"
+      REDIS_URL: redis://redis:6379/0
+      DOCUMENT_STORE_MODE: s3
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: beholder
+      S3_SECRET_KEY: beholder123
+      S3_BUCKET: beholder-documents
+      WORKER_PROCESSES: "1"
+      WORKER_THREADS_PER_PROCESS: "4"
+      CLARO_HUB_API_KEY: ${CLARO_HUB_API_KEY:-}
+      MARITACA_API_KEY: ${MARITACA_API_KEY:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+    volumes:
+      - ./app:/app/app
+    restart: unless-stopped
+    command: dramatiq app.workers --processes 1 --threads 4
 
 volumes:
   beholder_pgdata_dev:
+  beholder_redisdata_dev:
+  beholder_miniodata_dev:
