@@ -59,6 +59,27 @@ opentelemetry-instrumentation-fastapi>=0.49b1
 langfuse>=2.50.0,<4.0.0
 mlflow>=2.17.0,<4.0.0
 
+# Payments domain — Fase 0+ (Empreiteiras-WF)
+# Worker assíncrono para extração PDF + reconciliação batch. Redis como broker
+# (docker-compose oferece o serviço local). Substitui o uso de BackgroundTasks
+# do FastAPI para qualquer trabalho que ultrapasse o ciclo de request.
+dramatiq[redis]>=1.16.0,<2.0.0
+# S3-compatible adapter do DocumentStore (MinIO local em dev, S3 em prod).
+boto3>=1.34.0,<2.0.0
+# Suporte pgvector via SQLAlchemy/asyncpg. A extension `vector` é criada na
+# migration 001_create_payments_schema.sql; este pacote dá os tipos Python.
+pgvector>=0.2.5,<1.0.0
+# DataFrame engine para ingestão XLSX em massa (Fase 1). Polars supera pandas
+# em ordem de magnitude para arquivos como Analítico WF (869k×81) e EKPO 41 MB.
+polars>=0.20.0,<2.0.0
+# Match fuzzy para REGRA 5 (UF/Cidade/Tec/Ativ/Categoria/Objeto) — Fase 2/5.
+rapidfuzz>=3.5.0,<4.0.0
+# Structured LLM outputs (Pydantic schema) — Fase 4 extração PDF.
+instructor>=1.0.0,<2.0.0
+# PDF parsing para extração contratos (Fase 4). Substitui pdfplumber do spike
+# Pré-C; tem OCR + estrutura tabular essencial pra LPU.
+docling>=1.0.0,<3.0.0
+
 # Tests
 pytest==8.3.3
 pytest-asyncio==0.24.0

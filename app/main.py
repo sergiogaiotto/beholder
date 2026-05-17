@@ -38,6 +38,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app import __version__
 from app.adapters.db.postgres import close_pool, init_db
+from app.adapters.db.postgres_payments import close_payments_pool, init_payments_schema
 from app.api.routers import (
     access_router,
     api_endpoints_router,
@@ -91,6 +92,9 @@ async def lifespan(app: FastAPI):
     # bootstrap: garante schema, seed, módulos default e taxonomia churn.
     # `init_db()` também inicializa o pool asyncpg.
     await init_db()
+    # [Fase 0] Bootstrap do schema `payments` + pool dedicado. Migrations em
+    # app/adapters/db/migrations/ são aplicadas idempotentemente.
+    await init_payments_schema()
     gc_task = asyncio.create_task(_artifact_gc_loop(), name="artifact_gc")
     try:
         yield
@@ -100,8 +104,9 @@ async def lifespan(app: FastAPI):
             await gc_task
         except asyncio.CancelledError:
             pass
-        # Fecha o pool — espera conexões ativas drenarem (max 30s default).
+        # Fecha pools — espera conexões ativas drenarem (max 30s default).
         await close_pool()
+        await close_payments_pool()
 
 
 app = FastAPI(

@@ -90,6 +90,41 @@ class Settings(BaseSettings):
     guardrail_injection_block: bool = True
     guardrail_pii_redact: bool = True
 
+    # ============================================================
+    # Payments domain (Fase 0+ Empreiteiras-WF)
+    # ============================================================
+
+    # Pool PG dedicado ao schema `payments`. Isolamento de carga:
+    # cargas batch (XLSX → wf_payment 869k linhas) não roubam conexões dos
+    # endpoints existentes (Radar/Raio-X). Habilitado em produção; em dev
+    # default usa o mesmo banco mas dois pools (limita disputa).
+    payments_pool_min_size: int = 2
+    payments_pool_max_size: int = 10
+    payments_pool_max_inactive_connection_lifetime: float = 300.0
+    payments_pool_command_timeout: float = 60.0  # batch jobs precisam de mais
+
+    # Redis (broker dramatiq + cache). Em dev: docker-compose.yml oferece.
+    redis_url: str = "redis://localhost:6379/0"
+
+    # DocumentStore — armazenamento de PDFs/anexos.
+    # Modo: "filesystem" (dev) | "s3" (prod). MinIO local é compatible com s3.
+    document_store_mode: str = "filesystem"
+    document_store_fs_root: str = ""  # default: <repo>/data/documents
+    # S3 config (também usado com MinIO em dev)
+    s3_endpoint_url: str = ""  # vazio = AWS S3 real; preencher para MinIO
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_bucket: str = "beholder-documents"
+    s3_region: str = "us-east-1"
+
+    # Dramatiq worker — concurrency por processo
+    worker_processes: int = 1
+    worker_threads_per_process: int = 4
+
+    # Diretório de dados brutos (XLSX/PDFs/TXT — fora do repo). Usado pelos
+    # scripts de ingestão (Pré-A/B/C + Fase 1).
+    beholder_data_dir: str = r"C:\_PERSONAL\beholder_data"
+
     @property
     def pg_dsn(self) -> str:
         """Normaliza o DSN para o formato aceito por `asyncpg.connect`/`create_pool`.
