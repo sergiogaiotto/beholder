@@ -44,15 +44,10 @@ from app.api.routers import (
     auth_router,
     audit_router,
     blocks_router,
-    churn_router,
-    failsafe_router,
     finops_router,
     modules_router,
     pages,
-    presentations_router,
     prompts_router,
-    radar_router,
-    raiox_router,
     skills_router,
     users_router,
 )
@@ -134,17 +129,12 @@ app.include_router(pages.router)
 # APIs
 app.include_router(auth_router.router, prefix="/api/auth", tags=["auth"])
 app.include_router(users_router.router, prefix="/api/users", tags=["users"])
-app.include_router(radar_router.router, prefix="/api/radar", tags=["radar"])
-app.include_router(raiox_router.router, prefix="/api/raiox", tags=["raiox"])
-app.include_router(churn_router.router, prefix="/api/churn", tags=["churn"])
 app.include_router(prompts_router.router, prefix="/api/prompts", tags=["prompts"])
 app.include_router(finops_router.router, prefix="/api/finops", tags=["finops"])
-app.include_router(failsafe_router.router, prefix="/api/failsafe", tags=["failsafe"])
 app.include_router(modules_router.router, prefix="/api/modules", tags=["modules"])
 app.include_router(skills_router.router, prefix="/api/skills", tags=["skills"])
 app.include_router(blocks_router.router, prefix="/api/blocks", tags=["blocks"])
 app.include_router(audit_router.router, prefix="/api/audit", tags=["audit"])
-app.include_router(presentations_router.router, prefix="/api/presentations", tags=["presentations"])
 app.include_router(api_endpoints_router.router, prefix="/api/api-endpoints", tags=["api-endpoints"])
 app.include_router(access_router.router, prefix="/api/access", tags=["access"])
 

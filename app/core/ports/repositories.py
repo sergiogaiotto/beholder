@@ -6,21 +6,12 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 
 from app.core.domain.entities import (
-    AnalysisCard,
-    ChurnClassification,
-    ChurnNode,
-    Contract,
-    FailsafeAction,
     FinOpsAlert,
     FinOpsBudget,
     FinOpsEntry,
     FinOpsModelPolicy,
     Module,
     PromptBundle,
-    RaioXAnalysis,
-    RaioXBoard,
-    RaioXChart,
-    RaioXRelationship,
     User,
 )
 
@@ -114,45 +105,6 @@ class PromptRepository(ABC):
     async def set_modules(self, prompt_id: UUID, module_names: list[str]) -> None: ...
 
 
-class ContractRepository(ABC):
-    @abstractmethod
-    async def list_recent(self, limit: int = 200) -> list[Contract]: ...
-
-    @abstractmethod
-    async def get(self, contract_number: str) -> Contract | None: ...
-
-    @abstractmethod
-    async def bulk_upsert(self, contracts: list[Contract]) -> int: ...
-
-
-class AnalysisRepository(ABC):
-    @abstractmethod
-    async def list_for_contract(self, contract_number: str) -> list[AnalysisCard]: ...
-
-    @abstractmethod
-    async def save(self, card: AnalysisCard) -> AnalysisCard: ...
-
-    @abstractmethod
-    async def delete(self, card_id: UUID) -> None: ...
-
-
-class ChurnRepository(ABC):
-    @abstractmethod
-    async def get_taxonomy(self) -> list[ChurnNode]: ...
-
-    @abstractmethod
-    async def upsert_node(self, node: ChurnNode) -> ChurnNode: ...
-
-    @abstractmethod
-    async def delete_node(self, node_id: UUID) -> None: ...
-
-    @abstractmethod
-    async def save_classification(self, classification: ChurnClassification) -> None: ...
-
-    @abstractmethod
-    async def list_classifications(self, limit: int = 100) -> list[ChurnClassification]: ...
-
-
 class FinOpsRepository(ABC):
     @abstractmethod
     async def append(self, entry: FinOpsEntry) -> FinOpsEntry: ...
@@ -223,95 +175,3 @@ class FinOpsModelPolicyRepository(ABC):
     async def delete(self, policy_id: UUID) -> bool: ...
 
 
-class RaioXBoardRepository(ABC):
-    @abstractmethod
-    async def list_visible(self, user_id: str | None) -> list[RaioXBoard]: ...
-
-    @abstractmethod
-    async def get(self, board_id: UUID) -> RaioXBoard | None: ...
-
-    @abstractmethod
-    async def save(self, board: RaioXBoard) -> RaioXBoard: ...
-
-    @abstractmethod
-    async def delete(self, board_id: UUID) -> bool: ...
-
-
-class RaioXChartRepository(ABC):
-    @abstractmethod
-    async def list_for_board(self, board_id: UUID) -> list[RaioXChart]: ...
-
-    @abstractmethod
-    async def get(self, chart_id: UUID) -> RaioXChart | None: ...
-
-    @abstractmethod
-    async def save(self, chart: RaioXChart) -> RaioXChart: ...
-
-    @abstractmethod
-    async def delete(self, chart_id: UUID) -> bool: ...
-
-
-class RaioXAnalysisRepository(ABC):
-    @abstractmethod
-    async def list_for_board(self, board_id: UUID, limit: int = 50) -> list[RaioXAnalysis]: ...
-
-    @abstractmethod
-    async def get(self, analysis_id: UUID) -> RaioXAnalysis | None: ...
-
-    @abstractmethod
-    async def save(self, analysis: RaioXAnalysis) -> RaioXAnalysis: ...
-
-    @abstractmethod
-    async def delete(self, analysis_id: UUID) -> bool: ...
-
-
-class RaioXRelationshipRepository(ABC):
-    @abstractmethod
-    async def list_all(self) -> list[RaioXRelationship]: ...
-
-    @abstractmethod
-    async def list_for_table(self, table: str) -> list[RaioXRelationship]: ...
-
-    @abstractmethod
-    async def save(self, rel: RaioXRelationship) -> RaioXRelationship: ...
-
-    @abstractmethod
-    async def delete(self, rel_id: UUID) -> bool: ...
-
-    @abstractmethod
-    async def confirm(self, rel_id: UUID, username: str) -> bool: ...
-
-
-class FailsafeRepository(ABC):
-    @abstractmethod
-    async def list_pending(self) -> list[FailsafeAction]: ...
-
-    @abstractmethod
-    async def list_filtered(
-        self,
-        status: str | None = None,
-        module_name: str | None = None,
-        q: str | None = None,
-        limit: int = 30,
-        offset: int = 0,
-    ) -> list[FailsafeAction]: ...
-
-    @abstractmethod
-    async def count_filtered(
-        self,
-        status: str | None = None,
-        module_name: str | None = None,
-        q: str | None = None,
-    ) -> int: ...
-
-    @abstractmethod
-    async def count_by_status(self) -> dict[str, int]: ...
-
-    @abstractmethod
-    async def get(self, action_id: UUID) -> FailsafeAction | None: ...
-
-    @abstractmethod
-    async def save(self, action: FailsafeAction) -> FailsafeAction: ...
-
-    @abstractmethod
-    async def delete(self, action_id: UUID) -> bool: ...

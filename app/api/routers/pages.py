@@ -11,23 +11,16 @@ from fastapi.templating import Jinja2Templates
 from app.api.deps import (
     current_user_optional,
     get_auth_service,
-    get_bko_service,
-    get_churn_service,
-    get_failsafe_service,
     get_finops_service,
     get_prompt_service,
-    get_radar_service,
     get_registry_service,
     get_skill_service,
     get_user_admin_service,
 )
 from app.core.domain.entities import User
 from app.core.services.auth_service import AuthService
-from app.core.services.churn_service import ChurnService
-from app.core.services.failsafe_service import FailsafeService
 from app.core.services.finops_service import FinOpsService
 from app.core.services.prompt_service import PromptService
-from app.core.services.radar_service import RadarService
 from app.core.services.registry_service import RegistryService
 from app.core.services.skill_service import SkillService
 from app.core.services.user_admin_service import UserAdminService
@@ -236,113 +229,6 @@ async def _assert_feature_access(user: User, feature_key: str) -> None:
         )
 
 
-@router.get("/radar", response_class=HTMLResponse)
-async def radar_page(
-    request: Request,
-    case: str | None = None,
-    user: User | None = Depends(current_user_optional),
-    bko=Depends(get_bko_service),
-):
-    if not user:
-        return RedirectResponse("/login")
-    await _assert_feature_access(user, "vozcliente")
-    detail = None
-    selected_case = None
-    transcript = None
-    # Sem `?case=`, NÃO pré-seleciona — deixa o client decidir (via localStorage
-    # da última seleção; senão, mostra "selecione...")
-    if case:
-        detail = await bko.get_case_with_transcript(case)
-
-    if detail:
-        selected_case = detail["case"]
-        transcript = detail["transcript"]
-
-    return templates.TemplateResponse(
-        "radar/index.html",
-        await _ctx(
-            request, user,
-            active_module="radar",
-            selected_case=selected_case,
-            transcript=transcript,
-            stats=await bko.stats(),
-        ),
-    )
-
-
-@router.get("/radar/{case_number}", response_class=HTMLResponse)
-async def radar_case_page(
-    case_number: str,
-    request: Request,
-    user: User | None = Depends(current_user_optional),
-    bko=Depends(get_bko_service),
-):
-    if not user:
-        return RedirectResponse("/login")
-    await _assert_feature_access(user, "vozcliente")
-    detail = await bko.get_case_with_transcript(case_number)
-    if not detail:
-        # caso pode ter sido excluído — redireciona para o estado vazio em vez de 404
-        return RedirectResponse("/radar")
-    return templates.TemplateResponse(
-        "radar/index.html",
-        await _ctx(
-            request, user,
-            active_module="radar",
-            selected_case=detail["case"],
-            transcript=detail["transcript"],
-            stats=await bko.stats(),
-        ),
-    )
-
-
-# ---------- Raio X Cliente ----------
-
-@router.get("/raiox", response_class=HTMLResponse)
-async def raiox_page(
-    request: Request,
-    board: str | None = None,
-    user: User | None = Depends(current_user_optional),
-):
-    if not user:
-        return RedirectResponse("/login")
-    await _assert_feature_access(user, "raiox")
-    # Todos os usuários autenticados acessam (analista_n3 em modo leitura).
-    can_edit = any(r in {"admin", "supervisor"} for r in (user.roles or []))
-    # Cache-busting do raiox.js: usa mtime do arquivo como version param,
-    # garantindo que cada deploy serve a versão atual ao browser.
-    import os
-    js_path = BASE_DIR / "static" / "js" / "raiox.js"
-    asset_v = str(int(os.path.getmtime(js_path))) if js_path.exists() else "1"
-    return templates.TemplateResponse(
-        "raiox/index.html",
-        await _ctx(
-            request, user,
-            active_module="raiox",
-            can_edit=can_edit,
-            initial_board_id=board,
-            asset_v=asset_v,
-        ),
-    )
-
-
-# ---------- Churn ----------
-
-@router.get("/churn", response_class=HTMLResponse)
-async def churn_page(
-    request: Request,
-    user: User | None = Depends(current_user_optional),
-    svc: ChurnService = Depends(get_churn_service),
-):
-    if not user:
-        return RedirectResponse("/login")
-    roots = await svc.get_taxonomy()
-    return templates.TemplateResponse(
-        "churn/index.html",
-        await _ctx(request, user, active_module="churn", roots=roots),
-    )
-
-
 # ---------- Prompts ----------
 
 @router.get("/prompts", response_class=HTMLResponse)
@@ -354,15 +240,13 @@ async def prompts_page(
     if not user:
         return RedirectResponse("/login")
     _require_any_role(user, ['admin', 'supervisor'])
-    radar_prompts = await svc.list_for_module("radar")
-    churn_prompts = await svc.list_for_module("churn")
+    all_prompts = await svc.list_all()
     return templates.TemplateResponse(
         "prompts/index.html",
         await _ctx(
             request, user,
             active_module="prompts",
-            radar_prompts=radar_prompts,
-            churn_prompts=churn_prompts,
+            prompts=all_prompts,
         ),
     )
 
@@ -462,24 +346,6 @@ async def audit_page(
     return templates.TemplateResponse(
         "audit/index.html",
         await _ctx(request, user, active_module="audit"),
-    )
-
-
-# ---------- Failsafe ----------
-
-@router.get("/failsafe", response_class=HTMLResponse)
-async def failsafe_page(
-    request: Request,
-    user: User | None = Depends(current_user_optional),
-    svc: FailsafeService = Depends(get_failsafe_service),
-):
-    if not user:
-        return RedirectResponse("/login")
-    _require_any_role(user, ['admin', 'supervisor', 'finops'])
-    pending = await svc.list_pending()
-    return templates.TemplateResponse(
-        "failsafe/inbox.html",
-        await _ctx(request, user, active_module="failsafe", pending=pending),
     )
 
 
@@ -623,35 +489,6 @@ async def access_page(
     )
 
 
-@router.get("/gallery", response_class=HTMLResponse)
-async def gallery_page(
-    request: Request,
-    user: User | None = Depends(current_user_optional),
-):
-    if not user:
-        return RedirectResponse("/login")
-    _require_any_role(user, ['admin'])
-    return templates.TemplateResponse(
-        "gallery/index.html",
-        await _ctx(request, user, active_module="gallery"),
-    )
-
-
-@router.get("/gallery/{presentation_id}", response_class=HTMLResponse)
-async def gallery_detail_page(
-    presentation_id: str,
-    request: Request,
-    user: User | None = Depends(current_user_optional),
-):
-    if not user:
-        return RedirectResponse("/login")
-    _require_any_role(user, ['admin'])
-    return templates.TemplateResponse(
-        "gallery/detail.html",
-        await _ctx(request, user, active_module="gallery", presentation_id=presentation_id),
-    )
-
-
 # ---------- Skills ----------
 
 @router.get("/skills", response_class=HTMLResponse)
@@ -733,77 +570,3 @@ async def blocks_page(
     )
 
 
-# ---------- Cards em tela (Administrativo) ----------
-# Listagem global de TODOS os cards na tela "Voz do Cliente" — criadores,
-# nível de visibilidade e quem pode ver. Apenas admin/supervisor.
-
-@router.get("/admin/cards-em-tela", response_class=HTMLResponse)
-async def cards_em_tela_page(
-    request: Request,
-    user: User | None = Depends(current_user_optional),
-):
-    if not user:
-        return RedirectResponse("/login")
-    _require_any_role(user, ['admin', 'supervisor'])
-
-    from app.adapters.db.repositories.radar_card_visibility_repo import (
-        PgRadarCardVisibilityRepository,
-    )
-    from app.adapters.db.repositories.user_repo import PgUserRepository
-    repo = PgRadarCardVisibilityRepository()
-    rows = await repo.list_all()
-    # enriquece com `who_can_see` igual ao endpoint /api/radar/admin/cards.
-    # `created_at`/`updated_at` voltam do Postgres como `datetime` — o filtro
-    # `tojson` do Jinja usa `json.dumps` puro e estoura em datetime, então
-    # converte para ISO string aqui (o JS faz `new Date(...)` em cima).
-    # Lista completa de campos datetime devolvidos por _row_to_dict — TODOS
-    # precisam ser convertidos para ISO antes do `tojson` no template (que
-    # usa `json.dumps` puro e estoura em datetime).
-    # Inclui colunas de auditoria adicionadas em commits posteriores:
-    # visibility_changed_at, owner_changed_at. Bug latente: se algum card
-    # tinha esses campos preenchidos, /admin/cards-em-tela retornava 500.
-    _DT_FIELDS = (
-        "created_at",
-        "updated_at",
-        "visibility_changed_at",
-        "owner_changed_at",
-    )
-    for r in rows:
-        v = r.get("visibility") or "private"
-        dept = r.get("sharer_department")
-        dept_suffix = f"@{dept}" if dept else ""
-        if v == "private":
-            r["who_can_see"] = ["dono"]
-        elif v == "public_lideranca":
-            r["who_can_see"] = [
-                "dono",
-                f"admin{dept_suffix}",
-                f"supervisor{dept_suffix}",
-            ]
-        elif v == "public_analista":
-            r["who_can_see"] = [
-                "dono",
-                f"admin{dept_suffix}",
-                f"supervisor{dept_suffix}",
-                f"analista{dept_suffix}",
-            ]
-        else:
-            r["who_can_see"] = ["dono"]
-        for k in _DT_FIELDS:
-            ts = r.get(k)
-            if hasattr(ts, "isoformat"):
-                r[k] = ts.isoformat()
-
-    # Lista de usuários ativos para o seletor de "alterar dono"
-    users_repo = PgUserRepository()
-    all_users = await users_repo.list_all()
-    user_options = sorted(
-        [{"id": str(u.id), "username": u.username, "full_name": getattr(u, "full_name", "") or ""}
-         for u in all_users if getattr(u, "is_active", True)],
-        key=lambda u: u["username"].lower(),
-    )
-
-    return templates.TemplateResponse(
-        "admin/cards_em_tela.html",
-        await _ctx(request, user, active_module="cards_em_tela", cards=rows, user_options=user_options),
-    )

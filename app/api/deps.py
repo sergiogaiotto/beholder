@@ -8,10 +8,6 @@ from typing import Optional
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 
-from app.adapters.db.repositories.analysis_repo import PgAnalysisRepository
-from app.adapters.db.repositories.churn_repo import PgChurnRepository
-from app.adapters.db.repositories.contract_repo import PgContractRepository
-from app.adapters.db.repositories.failsafe_repo import PgFailsafeRepository
 from app.adapters.db.repositories.finops_repo import (
     PgFinOpsBudgetRepository,
     PgFinOpsModelPolicyRepository,
@@ -27,8 +23,6 @@ from app.adapters.observability.composite_tracer import CompositeTracer
 from app.adapters.policy.opa_adapter import OpaPolicyEngine
 from app.core.domain.entities import User
 from app.core.services.auth_service import AuthService
-from app.core.services.churn_service import ChurnService
-from app.core.services.failsafe_service import FailsafeService
 from app.core.services.finops_service import (
     CostAwareRouter,
     FinOpsBudgetService,
@@ -39,7 +33,6 @@ from app.core.services.model_router import ModelRouter
 from app.core.services.module_wizard_service import ModuleWizardService
 from app.core.services.skill_wizard_service import SkillWizardService
 from app.core.services.prompt_service import PromptService
-from app.core.services.radar_service import RadarService
 from app.core.services.registry_service import RegistryService
 from app.core.services.skill_service import SkillService
 from app.core.services.user_admin_service import UserAdminService
@@ -88,70 +81,14 @@ def get_prompt_repo():
     return PgPromptRepository()
 
 
-def get_contract_repo():
-    return PgContractRepository()
-
-
-def get_analysis_repo():
-    return PgAnalysisRepository()
-
-
-def get_churn_repo():
-    return PgChurnRepository()
-
-
 def get_finops_repo():
     return PgFinOpsRepository()
-
-
-def get_failsafe_repo():
-    return PgFailsafeRepository()
-
-
-def get_radar_state_repo():
-    from app.adapters.db.repositories.radar_state_repo import PgRadarStateRepository
-    return PgRadarStateRepository()
-
-
-def get_radar_card_visibility_repo():
-    from app.adapters.db.repositories.radar_card_visibility_repo import (
-        PgRadarCardVisibilityRepository,
-    )
-    return PgRadarCardVisibilityRepository()
 
 
 # ---------- services ----------
 
 def get_auth_service(users=Depends(get_user_repo)) -> AuthService:
     return AuthService(users)
-
-
-def get_radar_service(
-    contracts=Depends(get_contract_repo),
-    analyses=Depends(get_analysis_repo),
-    finops=Depends(get_finops_repo),
-) -> RadarService:
-    return RadarService(
-        contracts=contracts,
-        analyses=analyses,
-        finops=finops,
-        router=get_router_clients(),
-        input_guard=get_input_guardrail(),
-        output_guard=get_output_guardrail(),
-    )
-
-
-def get_churn_service(
-    churn=Depends(get_churn_repo),
-    finops=Depends(get_finops_repo),
-) -> ChurnService:
-    return ChurnService(
-        churn=churn,
-        finops=finops,
-        router=get_router_clients(),
-        input_guard=get_input_guardrail(),
-        output_guard=get_output_guardrail(),
-    )
 
 
 def get_prompt_service(prompts=Depends(get_prompt_repo)) -> PromptService:
@@ -190,10 +127,6 @@ def get_cost_aware_router(
     return CostAwareRouter(policy_svc, budget_svc)
 
 
-def get_failsafe_service(repo=Depends(get_failsafe_repo)) -> FailsafeService:
-    return FailsafeService(repo)
-
-
 def get_registry_service(modules=Depends(get_module_repo)) -> RegistryService:
     return RegistryService(modules)
 
@@ -217,46 +150,9 @@ def get_skill_wizard_service() -> SkillWizardService:
     return SkillWizardService(llms=build_clients())
 
 
-def get_bko_service():
-    from app.core.services.bko_service import BkoService
-    return BkoService()
-
-
 def get_schema_service():
     from app.core.services.schema_service import SchemaService
     return SchemaService()
-
-
-# ---------- Raio X Cliente ----------
-
-def get_raiox_board_repo():
-    from app.adapters.db.repositories.raiox_repo import PgRaioXBoardRepository
-    return PgRaioXBoardRepository()
-
-
-def get_raiox_chart_repo():
-    from app.adapters.db.repositories.raiox_repo import PgRaioXChartRepository
-    return PgRaioXChartRepository()
-
-
-def get_raiox_rel_repo():
-    from app.adapters.db.repositories.raiox_repo import PgRaioXRelationshipRepository
-    return PgRaioXRelationshipRepository()
-
-
-def get_raiox_analysis_repo():
-    from app.adapters.db.repositories.raiox_repo import PgRaioXAnalysisRepository
-    return PgRaioXAnalysisRepository()
-
-
-def get_raiox_service(
-    boards=Depends(get_raiox_board_repo),
-    charts=Depends(get_raiox_chart_repo),
-    rels=Depends(get_raiox_rel_repo),
-    schema=Depends(get_schema_service),
-):
-    from app.core.services.raiox_service import RaioXService
-    return RaioXService(boards=boards, charts=charts, rels=rels, schema=schema)
 
 
 # ---------- auth helpers ----------
