@@ -1,7 +1,7 @@
 [project]
 name = "beholder"
-version = "1.0.0"
-description = "Framework de Building Blocks de IA — Spec-Driven Development, arquitetura hexagonal"
+version = "0.1.0"
+description = "Plataforma de monitoramento e validação contínua de pagamentos em escala — fork de Vértice"
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]

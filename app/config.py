@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # Aceita tanto DSN puro (postgresql://user:pass@host:port/db) quanto a
     # forma SQLAlchemy (postgresql+asyncpg://...). O método `pg_dsn` normaliza
     # para o formato esperado por asyncpg (sem o sufixo +asyncpg).
-    database_url: str = "postgresql://beholder:beholder@localhost:5432/beholder-ia"
+    database_url: str = "postgresql://beholder:beholder@localhost:5432/beholder"
 
     # Pool de conexões — calibrado para throughput.
     # min_size: conexões "warm" mantidas no pool (latência baixa em pico)

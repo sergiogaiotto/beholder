@@ -4,7 +4,8 @@
 #     docker compose -f docker-compose.dev.yml up
 #
 # Diferenças vs `docker-compose.yml` (produção):
-#   - SEM Caddy (sem TLS, sem domínio): app exposta direto em 8000.
+#   - SEM Caddy (sem TLS, sem domínio): app exposta direto em 8100
+#     (porta diferente da Vértice para coexistirem na mesma estação dev).
 #   - Postgres exposto em 5432 do host para você conectar via DBeaver/psql.
 #   - Volume bind-mount `./app:/app/app` para hot-reload do uvicorn.
 #   - Mock de LLM padrão (sem chaves).
@@ -85,7 +86,7 @@ services:
       GAIA_MODEL: ${GAIA_MODEL:-gaia-4b}
       GAIA_BASE_URL: ${GAIA_BASE_URL:-}
     ports:
-      - "${APP_HOST_PORT:-8000}:8000"
+      - "${APP_HOST_PORT:-8100}:8000"
     volumes:
       # Bind-mount do código pra hot-reload. Skills moram em /app/app/skills,
       # então qualquer arquivo criado via UI também aparece no repo local

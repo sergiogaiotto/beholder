@@ -1,3 +1,3 @@
-"""Beholder — Framework de Building Blocks de IA."""
+"""Beholder — Plataforma de Monitoramento de Pagamentos."""
 
-__version__ = "1.0.0"
+__version__ = "0.1.0"

@@ -1,8 +1,18 @@
-# Beholder — Framework de Building Blocks de IA
+# Beholder — Plataforma de Monitoramento de Pagamentos
 
-Plataforma modular de agentes em Python/FastAPI seguindo Spec-Driven Development e arquitetura hexagonal. Cada funcionalidade é um *building block* registrado dinamicamente, com guardrails parametrizáveis (entrada → system prompt → saída), FinOps granular e observabilidade nativa.
+Solução de validação contínua de pagamentos em escala (80k+ pagamentos/mês), com extração de contratos (PDF + XLSX), motor de regras determinístico e camada semântica para casos cinzentos. Construída sobre a fundação hexagonal forkada do projeto Vértice, com isolamento de processamento para garantir performance sob carga.
 
-> Versão 2.0.0 · Hexagonal · Python 3.11+ · FastAPI · PostgreSQL (asyncpg) · LangGraph · Deep-Agent Harness
+> Versão 0.1.0 · Fork de [vertice-IA](https://github.com/sergiogaiotto/vertice) · Python 3.11+ · FastAPI · PostgreSQL (asyncpg) · LangGraph · Deep-Agent Harness
+
+**Verticais previstos:**
+- **Empreiteiras-WF** (primeiro) — monitoria do fluxo WF + SAP (EKKO/EKPO/ESLL) contra contratos jurídicos e LPU.
+- Verticais futuros: Fornecedores-NDI, Pagamentos-Recorrentes, Contratos-Diretos.
+
+**O que herda da Vértice (plataforma):**
+Auth + RBAC, Audit trail, FinOps ledger, Guardrails, OPA policy, multi-LLM adapters (Azure OpenAI / Maritaca Sabiá / GAIA / Hub Claro), Prompts versionados, Modules registry, Skills (SKILL.md), Text2SQL para discovery, observabilidade (OpenTelemetry + LangFuse + MLflow).
+
+**O que adiciona:**
+Worker assíncrono (dramatiq) para extração PDF e ingestão XLSX, schema PG isolado (`payments`), Schema Projector declarativo (SAP raw → semântico), rules engine de reconciliação, pgvector para cláusulas de contrato, materialized views para dashboards de KPI.
 
 ---
 
