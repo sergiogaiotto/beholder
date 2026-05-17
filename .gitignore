@@ -45,6 +45,12 @@ Thumbs.db
 data/
 backups/
 
+# Dados brutos do projeto (XLSX SAP, PDFs contratos, MSRV5 LPU, Analitico WF)
+# Local canonico: C:\_PERSONAL\beholder_data\ (acessado via BEHOLDER_DATA_DIR)
+# Defesa em profundidade: ignorar tambem qualquer FILES/ dentro do repo
+FILES/
+beholder_data/
+
 # Caddy persistente (TLS certs/state) — fica no volume Docker, não no repo
 caddy_data/
 caddy_config/
