@@ -11,18 +11,14 @@
        userRoles: window.__user_roles || [],
        items: [
          { href: '/',         label: 'Cockpit (visão geral)',           color: 'bg-brand-600',   group: 'Geral',         roles: null },
-         { href: '/radar',    label: 'Voz do Cliente',                  color: 'bg-brand-600',   group: 'Funcionalidade', roles: null },
-         { href: '/churn',    label: 'Gestão Churn (taxonomia)',        color: 'bg-ai-600',      group: 'Funcionalidade', roles: null },
          { href: '/prompts',  label: 'Editor de Prompts',               color: 'bg-neutral-400', group: 'Configurações',  roles: ['admin', 'supervisor'] },
          { href: '/skills',   label: 'Skills (SKILL.md)',               color: 'bg-neutral-400', group: 'Configurações',  roles: ['admin', 'supervisor'] },
          { href: '/modules',  label: 'Módulos',                         color: 'bg-neutral-400', group: 'Configurações',  roles: ['admin', 'supervisor'] },
          { href: '/blocks',   label: 'Inventário',                      color: 'bg-neutral-400', group: 'Configurações',  roles: ['admin', 'supervisor'] },
          { href: '/finops',   label: 'FinOps · custos e burndown',      color: 'bg-amber-500',   group: 'Monitoramento',  roles: ['admin', 'supervisor', 'finops'] },
-         { href: '/failsafe', label: 'Failsafe · inbox',                color: 'bg-risk-600',    group: 'Monitoramento',  roles: ['admin', 'supervisor', 'finops'] },
          { href: '/audit',    label: 'Rastreabilidade · audit trail',   color: 'bg-amber-500',   group: 'Monitoramento',  roles: ['admin', 'supervisor', 'finops'] },
          { href: '/users',    label: 'Usuários (admin)',                color: 'bg-neutral-400', group: 'Administrativo', roles: ['admin'] },
          { href: '/apis',      label: 'APIs · endpoints externos',       color: 'bg-ai-600',      group: 'Administrativo', roles: ['admin'] },
-         { href: '/gallery',  label: 'Galeria de Apresentações',        color: 'bg-brand-600',   group: 'Administrativo', roles: ['admin'] },
          { href: '/api/docs', label: 'Documentação OpenAPI',            color: 'bg-neutral-400', group: 'Geral',         roles: null }
        ],
        allowed() {

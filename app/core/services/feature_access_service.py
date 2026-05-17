@@ -32,29 +32,18 @@ from app.adapters.db.repositories.feature_access_repo import (
 )
 
 
-# Catálogo de features controláveis. Mantenha em sync com:
+# Catálogo de features controláveis. Beholder começa vazio — features
+# de produto (ex.: 'empreiteiras-wf') serão adicionadas conforme cada
+# vertical de monitoramento de pagamento entra. Mantenha em sync com:
 #   - `pages.py`: cada feature precisa de page guard chamando `can_access`
 #   - `nav_left.html`: a entry no menu mapeia para a feature_key via
-#     `NAV_ENTRY_TO_FEATURE` abaixo (a entry key continua sendo o key
-#     interno de UI, ex.: 'radar', que casa com `active_module` para
-#     highlight; já a `feature_key` na matriz é o nome de DOMÍNIO,
-#     ex.: 'vozcliente', que aparece em /access pra usuários finais)
+#     `NAV_ENTRY_TO_FEATURE`
 #   - tela /access: lista as features como colunas da grid
-#
-# Histórico: 'radar' (interno) → 'vozcliente' (nome de produto exibido).
-# A migration em schema.sql renomeia linhas pré-existentes para que regras
-# antigas continuem aplicáveis ao mesmo módulo sob o novo nome.
-CONTROLLED_FEATURES = ("vozcliente", "raiox")
+CONTROLLED_FEATURES: tuple[str, ...] = ()
 
-# Mapeamento entry-key-no-menu → feature_key-na-matriz. Permite que o
-# `active_module` (UI) e o nome técnico das pastas/rotas (`/radar`,
-# `app/templates/radar/`) continuem como estão, sem renomear código,
-# enquanto a face de domínio exibida ao usuário fica em sync com o
-# label "Voz do Cliente".
-NAV_ENTRY_TO_FEATURE = {
-    "radar": "vozcliente",
-    "raiox": "raiox",
-}
+# Mapeamento entry-key-no-menu → feature_key-na-matriz. Vazio enquanto
+# nenhuma feature controlada existir.
+NAV_ENTRY_TO_FEATURE: dict[str, str] = {}
 
 
 class FeatureAccessService:

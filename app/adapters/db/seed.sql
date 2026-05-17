@@ -29,6 +29,5 @@ INSERT INTO permissions (code) VALUES
     ('execute:agent_analysis'),
     ('manage:prompts'),
     ('manage:modules'),
-    ('approve:failsafe'),
     ('view:finops')
 ON CONFLICT (code) DO NOTHING;

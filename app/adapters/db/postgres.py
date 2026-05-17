@@ -42,7 +42,6 @@ from typing import Any
 import asyncpg
 
 from app.config import get_settings
-from app.core.domain.entities import Module, ModuleStatus, new_uuid
 
 # IMPORTANT: do NOT capture `settings` at module load. Tests rely on
 # monkeypatching DATABASE_URL after this module is imported (conftest's
@@ -278,69 +277,8 @@ async def init_db() -> None:
         try:
             await _exec_script(conn, schema)
             await _exec_script(conn, seed)
-
-            # Bootstrap módulos default — idempotente via `ON CONFLICT DO NOTHING`.
-            defaults = [
-                Module(
-                    id=new_uuid(),
-                    name="radar",
-                    endpoint_url="/api/radar/v1/process",
-                    status=ModuleStatus.active,
-                    # temperature=0.0 → output determinístico. Sem isso, com
-                    # default 0.2, a mesma transcrição gerava respostas com
-                    # tamanho/estrutura diferentes entre auto-execute (troca
-                    # de caso) e re-executar manual. radar_service lê esse
-                    # campo via `module.config_params["temperature"]`.
-                    config_params={"threshold": 0.7, "sanitization": True, "failsafe": False, "temperature": 0.0},
-                    description="Voz do Cliente — cards de análise sobre transcrições.",
-                    skill_path="app/skills/radar_intent.md",
-                ),
-                Module(
-                    id=new_uuid(),
-                    name="churn",
-                    endpoint_url="/api/churn/v1/process",
-                    status=ModuleStatus.active,
-                    config_params={"threshold": 0.65, "auto_grow_taxonomy": True},
-                    description="Classificador hierárquico de motivos de cancelamento.",
-                    skill_path="app/skills/churn_classifier.md",
-                ),
-            ]
-            for m in defaults:
-                await conn.execute(
-                    """
-                    INSERT INTO modules (id, name, endpoint_url, status, config_params,
-                                         description, skill_path)
-                    VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7)
-                    ON CONFLICT (name) DO NOTHING
-                    """,
-                    str(m.id), m.name, m.endpoint_url, m.status.value,
-                    m.config_params, m.description, m.skill_path,
-                )
-
-            # Bootstrap taxonomia churn raiz (idempotente).
-            existing = await conn.fetchval("SELECT COUNT(*) FROM churn_nodes")
-            if existing == 0:
-                roots = [
-                    ("Preço", []),
-                    ("Qualidade do serviço", ["Sinal/cobertura", "Velocidade", "Quedas"]),
-                    ("Atendimento", ["Tempo de espera", "Falta de resolução"]),
-                    ("Concorrência", ["Oferta melhor", "Indicação de terceiros"]),
-                    ("Mudança de necessidade", []),
-                ]
-                for label, children in roots:
-                    rid = str(new_uuid())
-                    await conn.execute(
-                        "INSERT INTO churn_nodes (id, label, parent_id, depth) "
-                        "VALUES ($1::uuid, $2, NULL, 0)",
-                        rid, label,
-                    )
-                    for c in children:
-                        cid = str(new_uuid())
-                        await conn.execute(
-                            "INSERT INTO churn_nodes (id, label, parent_id, depth) "
-                            "VALUES ($1::uuid, $2, $3::uuid, 1)",
-                            cid, c, rid,
-                        )
+            # Módulos default e taxonomias serão definidos pelos verticais
+            # de monitoramento (ex.: Empreiteiras-WF) à medida que entrarem.
         finally:
             # Libera explicitamente — apesar de o lock cair sozinho quando
             # a conexão for devolvida ao pool. Belt-and-suspenders.

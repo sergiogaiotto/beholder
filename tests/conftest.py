@@ -102,22 +102,13 @@ def _isolated_test_schema(monkeypatch_session, event_loop):
 _KNOWN_TABLES = (
     "audit_events",
     "api_calls", "api_endpoints",
-    "presentations",
-    "raiox_analyses", "raiox_charts", "raiox_boards", "raiox_relationships",
-    "radar_card_visibility", "radar_user_state",
     "finops_alerts", "finops_budgets", "finops_model_policies", "finops_ledger",
-    "failsafe_actions",
-    "churn_classifications", "churn_nodes",
-    "analysis_cards", "contracts",
-    "transcripts", "bko_cases",
+    "artifacts",
     "prompts",
     "modules",
-    "feature_access",   # matriz Funcionalidades por Perfil — regras vazavam
-                        # entre testes e bloqueavam smoke de /radar com deny
-                        # criado por teste de feature_access anterior.
+    "feature_access",   # matriz de acesso — regras vazavam entre testes.
     "user_roles", "users",
-    # roles/permissions/permissions deixam o seed em paz: testes esperam ver
-    # roles base.
+    # roles/permissions deixam o seed em paz: testes esperam ver roles base.
 )
 
 
