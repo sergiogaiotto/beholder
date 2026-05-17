@@ -36,7 +36,7 @@ class OpaPolicyEngine(PolicyEngine):
 
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.post(
-                f"{self.opa_url}/v1/data/vertice/authz/allow",
+                f"{self.opa_url}/v1/data/beholder/authz/allow",
                 json={"input": {"subject": subject, "action": action, "resource": resource}},
             )
             resp.raise_for_status()
@@ -53,7 +53,7 @@ class OpaPolicyEngine(PolicyEngine):
 
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.post(
-                f"{self.opa_url}/v1/data/vertice/router/model",
+                f"{self.opa_url}/v1/data/beholder/router/model",
                 json={"input": intent},
             )
             resp.raise_for_status()

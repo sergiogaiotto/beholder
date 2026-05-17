@@ -1,5 +1,5 @@
 #!/bin/sh
-# Vértice — backup loop para o container `pgbackup` do compose de produção.
+# Beholder — backup loop para o container `pgbackup` do compose de produção.
 #
 # Estratégia:
 #   - Roda em foreground (PID 1 do container) num while-true.
@@ -33,7 +33,7 @@ log() {
 
 dump_now() {
     ts="$(date -u '+%Y%m%dT%H%M%SZ')"
-    out="${BACKUP_DIR}/vertice_${ts}.dump"
+    out="${BACKUP_DIR}/beholder_${ts}.dump"
     tmp="${out}.tmp"
     log "iniciando pg_dump → ${out}"
     if pg_dump --format=custom --compress=6 --file="$tmp" "$PGDATABASE"; then
@@ -49,7 +49,7 @@ dump_now() {
     # Retenção: apaga dumps mais velhos que BACKUP_KEEP_DAYS
     if [ "$BACKUP_KEEP_DAYS" -gt 0 ]; then
         log "removendo backups com mais de ${BACKUP_KEEP_DAYS} dias"
-        find "$BACKUP_DIR" -name 'vertice_*.dump' -type f \
+        find "$BACKUP_DIR" -name 'beholder_*.dump' -type f \
              -mtime +"$BACKUP_KEEP_DAYS" -print -delete | \
              sed 's/^/  removido: /' || true
     fi

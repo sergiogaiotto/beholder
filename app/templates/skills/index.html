@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Skills — Vértice{% endblock %}
+{% block title %}Skills — Beholder{% endblock %}
 
 {% block content %}
 <div x-data="skillsApp()" x-init="init()" class="flex h-[calc(100vh-3rem-2rem)]">
@@ -83,7 +83,7 @@
 
       <!-- Preview -->
       <div class="flex-1 min-w-0 overflow-y-auto p-6 bg-neutral-50" x-show="view !== 'edit'">
-        <div class="prose-vertice max-w-none" x-html="renderedHtml"></div>
+        <div class="prose-beholder max-w-none" x-html="renderedHtml"></div>
       </div>
 
     </div>
@@ -105,7 +105,7 @@
   </div>
 
   <!-- ============================================================ -->
-  <!-- Modal: IA, me ajuda! (gerador de SKILL.md alinhado à Vértice) -->
+  <!-- Modal: IA, me ajuda! (gerador de SKILL.md alinhado à Beholder) -->
   <!-- ============================================================ -->
   <div x-show="wizardOpen" x-cloak class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
     <div @click.outside="!wizardLoading && (wizardOpen = false)" class="bg-white rounded-xl w-[760px] max-w-full max-h-[90vh] overflow-hidden flex flex-col">
@@ -123,7 +123,7 @@
           <div>
             <h3 class="text-base font-medium">IA, me ajuda a criar uma skill</h3>
             <p class="text-xs text-neutral-500 mt-0.5">
-              descreva em linguagem natural o que esse agente deve fazer — a IA gera um SKILL.md completo, alinhado ao formato canônico Vértice
+              descreva em linguagem natural o que esse agente deve fazer — a IA gera um SKILL.md completo, alinhado ao formato canônico Beholder
             </p>
           </div>
         </div>
@@ -243,17 +243,17 @@
 </div>
 
 <style>
-.prose-vertice h1 { font-size: 1.5rem; font-weight: 500; margin-bottom: 0.75rem; color: #111; }
-.prose-vertice h2 { font-size: 1.1rem; font-weight: 500; margin-top: 1.25rem; margin-bottom: 0.5rem; color: #111; border-bottom: 1px solid #e5e5e5; padding-bottom: 0.25rem; }
-.prose-vertice h3 { font-size: 0.95rem; font-weight: 500; margin-top: 1rem; margin-bottom: 0.4rem; color: #333; }
-.prose-vertice p { font-size: 0.875rem; line-height: 1.7; color: #444; margin-bottom: 0.6rem; }
-.prose-vertice ul, .prose-vertice ol { font-size: 0.875rem; line-height: 1.7; color: #444; padding-left: 1.5rem; margin-bottom: 0.6rem; }
-.prose-vertice li { margin-bottom: 0.15rem; }
-.prose-vertice code { background: #f1efe8; padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.82em; color: #DC2626; }
-.prose-vertice pre { background: #f7f7f5; padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; }
-.prose-vertice pre code { background: transparent; padding: 0; color: #333; }
-.prose-vertice strong { font-weight: 500; color: #111; }
-.prose-vertice blockquote { border-left: 3px solid #F87171; padding-left: 0.75rem; color: #555; font-style: italic; margin: 0.5rem 0; }
+.prose-beholder h1 { font-size: 1.5rem; font-weight: 500; margin-bottom: 0.75rem; color: #111; }
+.prose-beholder h2 { font-size: 1.1rem; font-weight: 500; margin-top: 1.25rem; margin-bottom: 0.5rem; color: #111; border-bottom: 1px solid #e5e5e5; padding-bottom: 0.25rem; }
+.prose-beholder h3 { font-size: 0.95rem; font-weight: 500; margin-top: 1rem; margin-bottom: 0.4rem; color: #333; }
+.prose-beholder p { font-size: 0.875rem; line-height: 1.7; color: #444; margin-bottom: 0.6rem; }
+.prose-beholder ul, .prose-beholder ol { font-size: 0.875rem; line-height: 1.7; color: #444; padding-left: 1.5rem; margin-bottom: 0.6rem; }
+.prose-beholder li { margin-bottom: 0.15rem; }
+.prose-beholder code { background: #f1efe8; padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.82em; color: #DC2626; }
+.prose-beholder pre { background: #f7f7f5; padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; }
+.prose-beholder pre code { background: transparent; padding: 0; color: #333; }
+.prose-beholder strong { font-weight: 500; color: #111; }
+.prose-beholder blockquote { border-left: 3px solid #F87171; padding-left: 0.75rem; color: #555; font-style: italic; margin: 0.5rem 0; }
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>

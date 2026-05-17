@@ -13,7 +13,7 @@ from app.config import get_settings
 from app.core.ports.observability import Tracer
 
 settings = get_settings()
-logger = logging.getLogger("vertice.tracer")
+logger = logging.getLogger("beholder.tracer")
 
 
 class CompositeTracer(Tracer):

@@ -1,11 +1,11 @@
-// Vértice — toast notifications + helpers HTTP
+// Beholder — toast notifications + helpers HTTP
 
 (function () {
   function ensureContainer() {
-    let c = document.getElementById("vertice-toasts");
+    let c = document.getElementById("beholder-toasts");
     if (!c) {
       c = document.createElement("div");
-      c.id = "vertice-toasts";
+      c.id = "beholder-toasts";
       c.className = "fixed top-16 right-4 z-[60] flex flex-col gap-2 pointer-events-none";
       document.body.appendChild(c);
     }

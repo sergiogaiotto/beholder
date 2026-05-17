@@ -1,4 +1,4 @@
-"""Entrypoint FastAPI da plataforma Vértice."""
+"""Entrypoint FastAPI da plataforma Beholder."""
 
 import logging
 import warnings
@@ -75,13 +75,13 @@ async def _artifact_gc_loop():
             await asyncio.sleep(_ARTIFACT_GC_INTERVAL_SECONDS)
             deleted = await store.gc()
             if deleted:
-                logging.getLogger("vertice").info(
+                logging.getLogger("beholder").info(
                     "artifact_gc: removidos %d artefato(s) expirado(s)", deleted
                 )
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
-            logging.getLogger("vertice").exception(
+            logging.getLogger("beholder").exception(
                 "artifact_gc loop falhou (continua tentando)"
             )
 

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     )
 
     # App
-    app_name: str = "Vértice"
+    app_name: str = "Beholder"
     app_env: str = "development"
     app_host: str = "0.0.0.0"
     app_port: int = 8000
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # Aceita tanto DSN puro (postgresql://user:pass@host:port/db) quanto a
     # forma SQLAlchemy (postgresql+asyncpg://...). O método `pg_dsn` normaliza
     # para o formato esperado por asyncpg (sem o sufixo +asyncpg).
-    database_url: str = "postgresql://vertice:vertice@localhost:5432/vertice-ia"
+    database_url: str = "postgresql://beholder:beholder@localhost:5432/beholder-ia"
 
     # Pool de conexões — calibrado para throughput.
     # min_size: conexões "warm" mantidas no pool (latência baixa em pico)
@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     langfuse_host: str = "https://cloud.langfuse.com"
     mlflow_tracking_uri: str = ""
     otel_exporter_otlp_endpoint: str = ""
-    otel_service_name: str = "vertice"
+    otel_service_name: str = "beholder"
 
     # Policy
     opa_url: str = ""

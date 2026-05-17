@@ -1,6 +1,6 @@
 # **Documentação Técnica: Framework de Building Blocks de IA**
 
-**Nome:** Vértice  
+**Nome:** Beholder  
 **Versão:** 1.0.0  
 **Abordagem:** Spec-Driven Development (SDD)  
 **Arquitetura:** Hexagonal / Portas e Adaptadores

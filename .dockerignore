@@ -1,4 +1,4 @@
-# Vértice — .dockerignore
+# Beholder — .dockerignore
 # Reduz contexto enviado ao daemon e mantém a imagem enxuta.
 
 # VCS / IDE / OS

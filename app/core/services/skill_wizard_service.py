@@ -1,7 +1,7 @@
 """Use case: wizard 'IA, me ajuda' para sugerir um SKILL.md alinhado à plataforma.
 
 Recebe descrição em linguagem natural do que o agente deve fazer e devolve um
-SKILL.md completo seguindo o formato canônico Vértice:
+SKILL.md completo seguindo o formato canônico Beholder:
 
     # {Título}
 
@@ -55,10 +55,10 @@ def _slugify(text: str) -> str:
     return "_".join(parts)[:50] or "nova_skill"
 
 
-_SYSTEM_PROMPT = """Você é o arquiteto de skills da plataforma Vértice.
+_SYSTEM_PROMPT = """Você é o arquiteto de skills da plataforma Beholder.
 
 A partir de uma descrição livre em PT-BR do que um agente deve fazer, você gera
-um arquivo SKILL.md completo seguindo o formato CANÔNICO da plataforma Vértice.
+um arquivo SKILL.md completo seguindo o formato CANÔNICO da plataforma Beholder.
 
 # Formato OBRIGATÓRIO (NÃO altere a ordem nem os títulos das seções)
 

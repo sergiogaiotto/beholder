@@ -1,5 +1,5 @@
 [project]
-name = "vertice"
+name = "beholder"
 version = "1.0.0"
 description = "Framework de Building Blocks de IA — Spec-Driven Development, arquitetura hexagonal"
 requires-python = ">=3.11"

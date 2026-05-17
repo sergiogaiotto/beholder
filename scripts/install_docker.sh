@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Vértice — provisionamento inicial de uma VPS Hostinger (Ubuntu 22.04/24.04).
+# Beholder — provisionamento inicial de uma VPS Hostinger (Ubuntu 22.04/24.04).
 #
 # Idempotente: rode quantas vezes quiser. O que faz:
 #   1. apt update + pacotes essenciais (ca-certs, curl, gnupg, ufw, fail2ban)
@@ -104,7 +104,7 @@ fi
 #   22       SSH
 #   80       HTTP — necessário para ACME HTTP-01 challenge (Let's Encrypt)
 #            + redirect 308 para a porta HTTPS pública
-#   8010     HTTPS pública do Vértice (configurável em .env.production
+#   8010     HTTPS pública do Beholder (configurável em .env.production
 #            via PUBLIC_HTTPS_PORT). Aberta também em UDP para HTTP/3.
 PUBLIC_HTTPS_PORT="${PUBLIC_HTTPS_PORT:-8010}"
 log "configurando UFW (22, 80, ${PUBLIC_HTTPS_PORT})..."
@@ -113,7 +113,7 @@ ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp comment 'SSH'
 ufw allow 80/tcp comment 'HTTP (ACME challenge + redirect)'
-ufw allow "${PUBLIC_HTTPS_PORT}/tcp" comment 'HTTPS Vértice'
+ufw allow "${PUBLIC_HTTPS_PORT}/tcp" comment 'HTTPS Beholder'
 ufw allow "${PUBLIC_HTTPS_PORT}/udp" comment 'HTTP/3 QUIC'
 ufw --force enable
 ufw status verbose | sed 's/^/  /'
@@ -154,8 +154,8 @@ cat <<EOF
 
   Próximo passo:
     su - ${DEPLOY_USER}
-    git clone <url-do-repo> vertice
-    cd vertice
+    git clone <url-do-repo> beholder
+    cd beholder
     cp .env.production.example .env.production
     chmod 600 .env.production
     nano .env.production              # preencher TROCAR_*

@@ -1,4 +1,4 @@
-# Vértice — stack de DESENVOLVIMENTO local.
+# Beholder — stack de DESENVOLVIMENTO local.
 #
 # Para subir em DEV:
 #     docker compose -f docker-compose.dev.yml up
@@ -22,12 +22,12 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: vertice-postgres-dev
+    container_name: beholder-postgres-dev
     environment:
       # Credenciais FIXAS para o Postgres interno do compose dev.
-      POSTGRES_USER: vertice
-      POSTGRES_PASSWORD: vertice
-      POSTGRES_DB: vertice
+      POSTGRES_USER: beholder
+      POSTGRES_PASSWORD: beholder
+      POSTGRES_DB: beholder
       POSTGRES_INITDB_ARGS: "--data-checksums"
     command:
       - "postgres"
@@ -47,23 +47,23 @@ services:
       # mesmo sempre escuta em 5432 internamente.
       - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
-      - vertice_pgdata_dev:/var/lib/postgresql/data
+      - beholder_pgdata_dev:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vertice -d vertice"]
+      test: ["CMD-SHELL", "pg_isready -U beholder -d beholder"]
       interval: 5s
       timeout: 3s
       retries: 20
     restart: unless-stopped
 
-  vertice:
+  beholder:
     build: .
-    container_name: vertice-dev
+    container_name: beholder-dev
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       # FIXO: aponta para o serviço `postgres` deste compose.
-      DATABASE_URL: postgresql://vertice:vertice@postgres:5432/vertice
+      DATABASE_URL: postgresql://beholder:beholder@postgres:5432/beholder
       APP_SECRET_KEY: dev-only-not-a-secret-change-in-prod
       APP_ENV: development
       PG_POOL_MIN_SIZE: "5"
@@ -98,4 +98,4 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:
-  vertice_pgdata_dev:
+  beholder_pgdata_dev:

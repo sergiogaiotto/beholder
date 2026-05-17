@@ -1,4 +1,4 @@
-# Deploy do Vértice em VPS Hostinger
+# Deploy do Beholder em VPS Hostinger
 
 Guia completo do zero ao primeiro login, em ~15 minutos.
 
@@ -7,7 +7,7 @@ A stack publicada:
 ```
                               Internet
                   HTTP :80                HTTPS :8010
-                  (ACME +                 (Vértice
+                  (ACME +                 (Beholder
                   redirect)               público)
                      │                       │
                      ▼                       ▼
@@ -19,14 +19,14 @@ A stack publicada:
             ┌────────────────────┼────────────────────┐
             ▼                    ▼                    ▼
     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-    │  vertice     │◀───▶│  postgres    │◀───▶│  pgbackup    │
+    │  beholder     │◀───▶│  postgres    │◀───▶│  pgbackup    │
     │  FastAPI/    │ pool│  16-alpine   │pg_dp│  diário      │
     │  uvicorn     │async│              │     │  (volume)    │
     └──────────────┘  pg │              │     │              │
                          └──────────────┘     └──────────────┘
 ```
 
-A URL pública do Vértice é **`https://SEU_DOMINIO:8010`** (porta
+A URL pública do Beholder é **`https://SEU_DOMINIO:8010`** (porta
 configurável em `PUBLIC_HTTPS_PORT`). A porta **80** fica aberta apenas
 para o ACME challenge do Let's Encrypt e para redirecionar visitantes
 HTTP → HTTPS:8010. Postgres não é exposto — só rede Docker interna.
@@ -44,7 +44,7 @@ No painel da Hostinger:
 
 - **Sistema operacional**: Ubuntu 22.04 LTS ou 24.04 LTS
 - **Plano sugerido**: KVM 2 (2 vCPU / 8 GB RAM) — confortável. KVM 1 (1
-  vCPU / 4 GB) funciona com `VERTICE_MEM_LIMIT=512m`.
+  vCPU / 4 GB) funciona com `BEHOLDER_MEM_LIMIT=512m`.
 - **SSH key**: cadastre sua chave pública na criação. Evita senha de root.
 
 Após criar, anote o **IP público IPv4**.
@@ -94,8 +94,8 @@ O script é **idempotente** — pode rodar de novo sem problema. Ele:
 exit
 ssh deploy@SEU_IP
 
-git clone https://github.com/SEU_USER/SEU_REPO.git vertice
-cd vertice
+git clone https://github.com/SEU_USER/SEU_REPO.git beholder
+cd beholder
 cp .env.production.example .env.production
 chmod 600 .env.production
 nano .env.production
@@ -105,7 +105,7 @@ nano .env.production
 
 | Variável                    | Como gerar                                          |
 | --------------------------- | --------------------------------------------------- |
-| `DOMAIN`                    | seu domínio (ex: `vertice.exemplo.com.br`)         |
+| `DOMAIN`                    | seu domínio (ex: `beholder.exemplo.com.br`)         |
 | `ACME_EMAIL`                | seu e-mail (Let's Encrypt usa para avisos)         |
 | `APP_SECRET_KEY`            | `openssl rand -hex 32`                              |
 | `POSTGRES_PASSWORD`         | `openssl rand -base64 24`                           |
@@ -123,7 +123,7 @@ Opcional:
 | `PUBLIC_HTTP_PORT`   | `80`    | mantenha em 80 (ACME challenge precisa)     |
 
 Opcional: chaves de LLM (OpenAI / Maritaca / GAIA), LangFuse, MLflow, OPA.
-Sem chaves, o Vértice roda em **modo mock** — todas as telas ficam
+Sem chaves, o Beholder roda em **modo mock** — todas as telas ficam
 navegáveis para validação.
 
 ---
@@ -157,9 +157,9 @@ Se você está usando o serviço **VPS → Docker Manager** da Hostinger
 
    **Modo Produção (Let's Encrypt + domínio real)**:
    ```
-   DOMAIN=vertice.exemplo.com.br
+   DOMAIN=beholder.exemplo.com.br
    ACME_EMAIL=ops@exemplo.com.br
-   APP_BASE_URL=https://vertice.exemplo.com.br:8010
+   APP_BASE_URL=https://beholder.exemplo.com.br:8010
    ```
    Pré-requisitos: DNS A do DOMAIN aponta pro IP da VPS + porta 80
    aberta no firewall (Let's Encrypt usa HTTP-01 challenge).
@@ -215,7 +215,7 @@ Anote-as num gerenciador de senhas antes de submeter.
 ### Logs ao vivo
 
 ```bash
-docker compose -f docker-compose.yml --env-file .env.production logs -f vertice
+docker compose -f docker-compose.yml --env-file .env.production logs -f beholder
 docker compose -f docker-compose.yml --env-file .env.production logs -f caddy
 ```
 
@@ -224,7 +224,7 @@ Logs com rotação (10 MB × 5 arquivos por serviço, configurado no compose).
 ### Atualizar a aplicação
 
 ```bash
-cd ~/vertice
+cd ~/beholder
 ./scripts/deploy.sh
 ```
 
@@ -241,7 +241,7 @@ docker compose -f docker-compose.yml --env-file .env.production ps
 
 ```bash
 docker compose -f docker-compose.yml --env-file .env.production \
-     exec postgres psql -U vertice vertice
+     exec postgres psql -U beholder beholder
 ```
 
 ### Parar tudo (mantém dados)
@@ -263,7 +263,7 @@ docker compose -f docker-compose.yml --env-file .env.production down -v
 O serviço `pgbackup` faz `pg_dump` diário em **03:00 UTC** (configurável
 em `BACKUP_AT_HOUR_UTC`) com retenção de 7 dias (`BACKUP_KEEP_DAYS`).
 
-Os dumps ficam no volume nomeado `vertice_backups`, mapeado para
+Os dumps ficam no volume nomeado `beholder_backups`, mapeado para
 `/var/backups/postgres` dentro do container.
 
 ### Listar backups disponíveis
@@ -276,16 +276,16 @@ Os dumps ficam no volume nomeado `vertice_backups`, mapeado para
 
 ```bash
 docker compose -f docker-compose.yml --env-file .env.production \
-     cp pgbackup:/var/backups/postgres/vertice_<timestamp>.dump ./
+     cp pgbackup:/var/backups/postgres/beholder_<timestamp>.dump ./
 
 # do laptop, baixar via scp:
-scp deploy@SEU_IP:~/vertice/vertice_<timestamp>.dump ./
+scp deploy@SEU_IP:~/beholder/beholder_<timestamp>.dump ./
 ```
 
 ### Restaurar de um dump (⚠️ destrutivo)
 
 ```bash
-./scripts/restore.sh /var/backups/postgres/vertice_<timestamp>.dump
+./scripts/restore.sh /var/backups/postgres/beholder_<timestamp>.dump
 ```
 
 Pede confirmação interativa. Para de derrubar o app, dropa e recria o
@@ -299,7 +299,7 @@ Caddy gerencia certificados Let's Encrypt automaticamente:
 
 - Emissão automática no primeiro request HTTPS.
 - Renovação automática a cada ~60 dias.
-- Estado persistido em volume `vertice_caddy_data` (perdas zero entre
+- Estado persistido em volume `beholder_caddy_data` (perdas zero entre
   redeploy).
 
 ### Forçar renovação
@@ -322,7 +322,7 @@ docker compose -f docker-compose.yml --env-file .env.production \
 
 Edite `.env.production` conforme RAM disponível:
 
-| Plano (RAM) | `PG_SHARED_BUFFERS` | `PG_EFFECTIVE_CACHE_SIZE` | `VERTICE_MEM_LIMIT` |
+| Plano (RAM) | `PG_SHARED_BUFFERS` | `PG_EFFECTIVE_CACHE_SIZE` | `BEHOLDER_MEM_LIMIT` |
 | ----------- | ------------------- | ------------------------- | ------------------- |
 | 1 GB        | `128MB`             | `512MB`                   | `512m`              |
 | 2 GB        | `256MB`             | `1GB`                     | `768m`              |
@@ -386,7 +386,7 @@ APP_BASE_URL=https://SEU_DOMINIO
 Reabra a porta no firewall:
 
 ```bash
-sudo ufw allow 443/tcp comment 'HTTPS Vértice'
+sudo ufw allow 443/tcp comment 'HTTPS Beholder'
 sudo ufw allow 443/udp comment 'HTTP/3 QUIC'
 sudo ufw delete allow 8010/tcp
 sudo ufw delete allow 8010/udp
@@ -401,15 +401,15 @@ E aplique:
 ### App fica `unhealthy`
 
 ```bash
-docker compose -f docker-compose.yml --env-file .env.production logs vertice
+docker compose -f docker-compose.yml --env-file .env.production logs beholder
 ```
 
 Causas comuns:
 
 - `password authentication failed`: confira `POSTGRES_PASSWORD` no env.
-- `database "vertice" does not exist`: o Postgres não terminou o init no
-  primeiro boot. `docker compose ... restart vertice`.
-- OOM (out of memory): aumente `VERTICE_MEM_LIMIT` ou reduza
+- `database "beholder" does not exist`: o Postgres não terminou o init no
+  primeiro boot. `docker compose ... restart beholder`.
+- OOM (out of memory): aumente `BEHOLDER_MEM_LIMIT` ou reduza
   `PG_SHARED_BUFFERS`.
 
 ### Disco cheio
@@ -419,8 +419,8 @@ docker system df
 docker system prune -af --volumes   # ⚠️ remove volumes NÃO usados (cuidado)
 ```
 
-Os volumes nomeados (`vertice_pgdata`, `vertice_backups`,
-`vertice_caddy_data`, `vertice_caddy_config`) **não** são removidos por
+Os volumes nomeados (`beholder_pgdata`, `beholder_backups`,
+`beholder_caddy_data`, `beholder_caddy_config`) **não** são removidos por
 `prune` enquanto a stack estiver rodando.
 
 ### "permission denied" no docker
@@ -472,10 +472,10 @@ Sempre passar `-f docker-compose.yml --env-file .env.production`:
 DC="docker compose -f docker-compose.yml --env-file .env.production"
 
 $DC ps                                 # status dos serviços
-$DC logs -f vertice                    # logs do app ao vivo
-$DC restart vertice                    # restart só do app
-$DC exec vertice bash                  # shell dentro do container
-$DC exec postgres psql -U vertice      # console SQL
+$DC logs -f beholder                    # logs do app ao vivo
+$DC restart beholder                    # restart só do app
+$DC exec beholder bash                  # shell dentro do container
+$DC exec postgres psql -U beholder      # console SQL
 $DC down                               # para tudo (mantém dados)
 $DC down -v                            # para tudo e APAGA volumes
 $DC pull                               # atualiza imagens (se usa registry)
@@ -485,7 +485,7 @@ $DC up -d --build                      # rebuild local + sobe
 Crie um alias no `~/.bashrc` do `deploy` para encurtar:
 
 ```bash
-echo 'alias dc="docker compose -f ~/vertice/docker-compose.yml --env-file ~/vertice/.env.production"' \
+echo 'alias dc="docker compose -f ~/beholder/docker-compose.yml --env-file ~/beholder/.env.production"' \
      >> ~/.bashrc
 source ~/.bashrc
 ```

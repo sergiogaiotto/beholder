@@ -1,4 +1,4 @@
--- Vértice — seed inicial (PostgreSQL)
+-- Beholder — seed inicial (PostgreSQL)
 --
 -- ON CONFLICT DO NOTHING substitui o INSERT OR IGNORE do SQLite.
 

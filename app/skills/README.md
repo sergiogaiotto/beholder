@@ -1,6 +1,6 @@
 # Skills (`SKILL.md`) — contratos executáveis dos agentes
 
-Cada arquivo `SKILL.md` neste diretório é o **contrato declarativo** de um agente do Vértice. Não é documentação acessória — é o artefato que o System Prompt Canônico carrega em runtime para decidir:
+Cada arquivo `SKILL.md` neste diretório é o **contrato declarativo** de um agente do Beholder. Não é documentação acessória — é o artefato que o System Prompt Canônico carrega em runtime para decidir:
 
 - **Quais ferramentas** podem ser invocadas pelo agente (MCP, tools internas)
 - **Em que ordem** as ferramentas devem ser chamadas

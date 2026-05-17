@@ -17,7 +17,7 @@ from app.adapters.db.postgres import close_pool, init_db  # noqa: E402
 async def _run() -> None:
     try:
         await init_db()
-        print("Vértice — banco PostgreSQL inicializado com sucesso.")
+        print("Beholder — banco PostgreSQL inicializado com sucesso.")
     finally:
         await close_pool()
 

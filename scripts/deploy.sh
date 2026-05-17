@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Vértice — deploy/atualização da stack de produção.
+# Beholder — deploy/atualização da stack de produção.
 #
 # Idempotente. Roda do diretório do repo, NO host (não dentro de container).
 #   - valida que .env.production existe e tem secrets críticos preenchidos
@@ -54,10 +54,10 @@ else
 fi
 
 # ---------------------------------------------------------------- build + up
-log "build da imagem Vértice..."
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build vertice
+log "build da imagem Beholder..."
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build beholder
 
-log "subindo stack (caddy + vertice + postgres + pgbackup)..."
+log "subindo stack (caddy + beholder + postgres + pgbackup)..."
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --remove-orphans
 
 # ---------------------------------------------------------------- aguarda health
@@ -65,14 +65,14 @@ log "aguardando app ficar saudável (healthcheck do Docker)..."
 attempt=0
 max_attempts=40   # ~2 min total (40 × 3s)
 while [ $attempt -lt $max_attempts ]; do
-    status="$(docker inspect --format='{{.State.Health.Status}}' vertice-app 2>/dev/null || echo 'starting')"
+    status="$(docker inspect --format='{{.State.Health.Status}}' beholder-app 2>/dev/null || echo 'starting')"
     case "$status" in
-        healthy)   log "vertice-app: healthy ✓"; break ;;
-        unhealthy) err "vertice-app: unhealthy. Veja: docker compose logs vertice" ;;
+        healthy)   log "beholder-app: healthy ✓"; break ;;
+        unhealthy) err "beholder-app: unhealthy. Veja: docker compose logs beholder" ;;
         *)         printf '.'; sleep 3; attempt=$((attempt+1)) ;;
     esac
 done
-[ $attempt -lt $max_attempts ] || err "timeout esperando healthy. Veja: docker compose logs vertice"
+[ $attempt -lt $max_attempts ] || err "timeout esperando healthy. Veja: docker compose logs beholder"
 
 # ---------------------------------------------------------------- pós-deploy
 DOMAIN="$(grep -E '^DOMAIN=' "$ENV_FILE" | cut -d= -f2)"
@@ -97,12 +97,12 @@ cat <<EOF
                  3) Guarde a senha. Não há reset automático.
 
   Comandos úteis:
-    docker compose -f ${COMPOSE_FILE} --env-file ${ENV_FILE} logs -f vertice
+    docker compose -f ${COMPOSE_FILE} --env-file ${ENV_FILE} logs -f beholder
     docker compose -f ${COMPOSE_FILE} --env-file ${ENV_FILE} logs -f caddy
     docker compose -f ${COMPOSE_FILE} --env-file ${ENV_FILE} ps
     ./scripts/restore.sh --list                    # listar backups
     docker compose -f ${COMPOSE_FILE} --env-file ${ENV_FILE} \\
-         exec postgres psql -U vertice vertice    # console SQL
+         exec postgres psql -U beholder beholder    # console SQL
 
   Migração: o app aplica ADD COLUMN / CREATE TABLE IF NOT EXISTS no
   startup via init_db(). Não há passo manual de migration.
@@ -110,10 +110,10 @@ cat <<EOF
   Cleanup pontual do bug de leak entre usuários (rodar uma vez se
   estiver migrando de uma versão anterior ao fix):
     docker compose -f ${COMPOSE_FILE} --env-file ${ENV_FILE} \\
-         exec vertice python scripts/fix_radar_owner_leak.py
+         exec beholder python scripts/fix_radar_owner_leak.py
     # se aparecerem achados, re-rode com --apply:
     docker compose -f ${COMPOSE_FILE} --env-file ${ENV_FILE} \\
-         exec vertice python scripts/fix_radar_owner_leak.py --apply
+         exec beholder python scripts/fix_radar_owner_leak.py --apply
 
   Para atualizar o código:
     cd $(pwd) && ./scripts/deploy.sh

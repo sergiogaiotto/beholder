@@ -1,5 +1,5 @@
 -- ============================================================
--- Vértice — schema PostgreSQL v2.0.0
+-- Beholder — schema PostgreSQL v2.0.0
 --
 -- Sucessor do schema SQLite. Mudanças relevantes vs SQLite:
 --

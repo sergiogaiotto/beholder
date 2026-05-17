@@ -1,5 +1,5 @@
 #!/bin/sh
-# Vértice — restore de um backup gerado por scripts/backup.sh.
+# Beholder — restore de um backup gerado por scripts/backup.sh.
 #
 # Uso (no host com docker compose já rodando):
 #
@@ -7,7 +7,7 @@
 #   ./scripts/restore.sh --list
 #
 #   # 2) restaurar um dump específico (DESTRUTIVO — sobrescreve o banco atual)
-#   ./scripts/restore.sh /var/backups/postgres/vertice_20260510T030000Z.dump
+#   ./scripts/restore.sh /var/backups/postgres/beholder_20260510T030000Z.dump
 #
 # Para extrair um dump localmente do volume do Docker:
 #   docker compose -f docker-compose.yml --env-file .env.production \
@@ -25,7 +25,7 @@ BACKUP_DIR_IN_CONTAINER="/var/backups/postgres"
 
 usage() {
     cat <<EOF
-Vértice — restore tool
+Beholder — restore tool
 
   $0 --list                       lista backups disponíveis
   $0 <caminho-do-dump>            restaura o banco (DESTRUTIVO)
@@ -80,7 +80,7 @@ POSTGRES_DB="$(grep -E '^POSTGRES_DB=' "$ENV_FILE" | cut -d= -f2)"
 : "${POSTGRES_DB:?POSTGRES_DB não encontrado em ${ENV_FILE}}"
 
 echo "→ parando o app (mantém Postgres e pgbackup ativos)..."
-dc stop vertice caddy
+dc stop beholder caddy
 
 echo "→ recriando o banco ${POSTGRES_DB}..."
 dc exec -T postgres psql -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE IF EXISTS ${POSTGRES_DB};"
@@ -96,6 +96,6 @@ dc exec -T pgbackup pg_restore \
     "$DUMP_IN_CONTAINER"
 
 echo "→ subindo app + Caddy de volta..."
-dc up -d vertice caddy
+dc up -d beholder caddy
 
 echo "✓ restore concluído"

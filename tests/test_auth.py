@@ -12,8 +12,8 @@ async def test_register_and_authenticate():
     await init_db()
     auth = AuthService(PgUserRepository())
 
-    await auth.bootstrap_root("admin", "vertice2026")
-    user = await auth.authenticate("admin", "vertice2026")
+    await auth.bootstrap_root("admin", "beholder2026")
+    user = await auth.authenticate("admin", "beholder2026")
     assert user is not None
     assert user.username == "admin"
     assert "admin" in user.roles
@@ -23,7 +23,7 @@ async def test_register_and_authenticate():
 async def test_wrong_password_fails():
     await init_db()
     auth = AuthService(PgUserRepository())
-    await auth.bootstrap_root("admin", "vertice2026")
+    await auth.bootstrap_root("admin", "beholder2026")
     user = await auth.authenticate("admin", "errada")
     assert user is None
 
@@ -32,8 +32,8 @@ async def test_wrong_password_fails():
 async def test_token_roundtrip():
     await init_db()
     auth = AuthService(PgUserRepository())
-    await auth.bootstrap_root("admin", "vertice2026")
-    user = await auth.authenticate("admin", "vertice2026")
+    await auth.bootstrap_root("admin", "beholder2026")
+    user = await auth.authenticate("admin", "beholder2026")
     token = auth.issue_token(user)
     assert token
 

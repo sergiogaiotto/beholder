@@ -1,4 +1,4 @@
-// Vértice — Command Palette: atalho global ⌘K / Ctrl+K
+// Beholder — Command Palette: atalho global ⌘K / Ctrl+K
 document.addEventListener("keydown", (e) => {
   const isCmdK = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k";
   if (isCmdK) {

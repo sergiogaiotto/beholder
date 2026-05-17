@@ -1,10 +1,10 @@
 #!/bin/sh
-# Vértice — entrypoint shim do container.
+# Beholder — entrypoint shim do container.
 #
 # Faz seed inicial do volume de skills (app/skills/) quando vazio, depois
 # entrega controle pro CMD (uvicorn).
 #
-# Por que: o volume nomeado `vertice_skills` persiste skills criados via UI
+# Por que: o volume nomeado `beholder_skills` persiste skills criados via UI
 # entre redeploys. Mas no PRIMEIRO boot o volume é vazio — copiamos os
 # skills "shipped" no repo (snapshot em /opt/skills_seed) para que o app
 # nunca suba sem skills básicos.

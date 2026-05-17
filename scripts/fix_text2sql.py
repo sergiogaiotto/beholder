@@ -49,7 +49,7 @@ def _can_import(module: str) -> tuple[bool, str | None]:
 def diagnose() -> bool:
     """Imprime relatório de cada dep. Retorna True se tudo OK."""
     print("=" * 78)
-    print("DIAGNÓSTICO — Text-to-SQL Deep Agent (Vértice)")
+    print("DIAGNÓSTICO — Text-to-SQL Deep Agent (Beholder)")
     print("=" * 78)
     print(f"Python:    {sys.executable}")
     print(f"venv:      {sys.prefix}")

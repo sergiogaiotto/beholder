@@ -1,4 +1,4 @@
-# Vértice — stack HTTP pública (sem Caddy, sem TLS, sem domínio).
+# Beholder — stack HTTP pública (sem Caddy, sem TLS, sem domínio).
 #
 # Para deploy em VPS quando o acesso será via http://VPS_IP:PORT (ex.:
 # http://187.77.46.137:8010). Útil quando você ainda não tem domínio
@@ -6,7 +6,7 @@
 #
 # Diferenças em relação a docker-compose.yml (produção com Caddy/TLS):
 #   - Sem container Caddy, sem ACME, sem Let's Encrypt.
-#   - O serviço `vertice` (uvicorn na porta 8000 interna) é exposto
+#   - O serviço `beholder` (uvicorn na porta 8000 interna) é exposto
 #     diretamente em ${PUBLIC_PORT:-8010} do host.
 #   - `--proxy-headers` permanece ativo no uvicorn (sem efeito sem reverse
 #     proxy, mas inofensivo).
@@ -31,12 +31,12 @@ x-logging: &default-logging
 services:
 
   # ----------------------------------------------------------------- App
-  vertice:
+  beholder:
     build:
       context: .
       dockerfile: Dockerfile
-    image: vertice:${VERTICE_TAG:-latest}
-    container_name: vertice-app
+    image: beholder:${BEHOLDER_TAG:-latest}
+    container_name: beholder-app
     restart: unless-stopped
     # Exposição direta. ${PUBLIC_PORT} também aceita o nome herdado
     # ${PUBLIC_HTTPS_PORT} para compat com .env.production existente.
@@ -44,14 +44,14 @@ services:
       - "${PUBLIC_PORT:-${PUBLIC_HTTPS_PORT:-8010}}:8000"
     environment:
       # Banco — internal docker network
-      DATABASE_URL: ${DATABASE_URL:-postgresql://vertice:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vertice}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://beholder:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-beholder}}
       PG_POOL_MIN_SIZE: ${PG_POOL_MIN_SIZE:-5}
       PG_POOL_MAX_SIZE: ${PG_POOL_MAX_SIZE:-20}
       PG_POOL_MAX_INACTIVE_CONNECTION_LIFETIME: ${PG_POOL_MAX_INACTIVE_CONNECTION_LIFETIME:-300.0}
       PG_COMMAND_TIMEOUT: ${PG_COMMAND_TIMEOUT:-30.0}
       PG_STATEMENT_CACHE_SIZE: ${PG_STATEMENT_CACHE_SIZE:-1024}
       # App
-      APP_NAME: ${APP_NAME:-Vértice}
+      APP_NAME: ${APP_NAME:-Beholder}
       APP_ENV: ${APP_ENV:-production}
       APP_HOST: 0.0.0.0
       APP_PORT: 8000
@@ -86,7 +86,7 @@ services:
       LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-vertice}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-beholder}
       # Política
       OPA_URL: ${OPA_URL:-}
       # Guardrails
@@ -96,7 +96,7 @@ services:
       UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
     volumes:
       # Skills criadas/editadas via UI persistem aqui entre redeploys.
-      - vertice_skills:/app/app/skills
+      - beholder_skills:/app/app/skills
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,10 +104,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${VERTICE_MEM_LIMIT:-1g}
-          cpus: ${VERTICE_CPU_LIMIT:-1.5}
+          memory: ${BEHOLDER_MEM_LIMIT:-1g}
+          cpus: ${BEHOLDER_CPU_LIMIT:-1.5}
         reservations:
-          memory: ${VERTICE_MEM_RESERVE:-256m}
+          memory: ${BEHOLDER_MEM_RESERVE:-256m}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
       interval: 15s
@@ -119,14 +119,14 @@ services:
   # ----------------------------------------------------------------- Postgres
   postgres:
     image: postgres:16-alpine
-    container_name: vertice-postgres
+    container_name: beholder-postgres
     restart: unless-stopped
     expose:
       - "5432"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-vertice}
+      POSTGRES_USER: ${POSTGRES_USER:-beholder}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD não definido — defina no painel do Hostinger}
-      POSTGRES_DB: ${POSTGRES_DB:-vertice}
+      POSTGRES_DB: ${POSTGRES_DB:-beholder}
       POSTGRES_INITDB_ARGS: "--data-checksums"
       PGDATA: /var/lib/postgresql/data/pgdata
     command:
@@ -154,7 +154,7 @@ services:
       - "-c"
       - "track_io_timing=on"
     volumes:
-      - vertice_pgdata:/var/lib/postgresql/data
+      - beholder_pgdata:/var/lib/postgresql/data
     networks: [internal]
     deploy:
       resources:
@@ -164,7 +164,7 @@ services:
         reservations:
           memory: ${POSTGRES_MEM_RESERVE:-256m}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vertice} -d ${POSTGRES_DB:-vertice}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-beholder} -d ${POSTGRES_DB:-beholder}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -174,19 +174,19 @@ services:
   # ----------------------------------------------------------------- Backup
   pgbackup:
     image: postgres:16-alpine
-    container_name: vertice-pgbackup
+    container_name: beholder-pgbackup
     restart: unless-stopped
     environment:
       PGHOST: postgres
       PGPORT: 5432
-      PGUSER: ${POSTGRES_USER:-vertice}
+      PGUSER: ${POSTGRES_USER:-beholder}
       PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD não definido — defina no painel do Hostinger}
-      PGDATABASE: ${POSTGRES_DB:-vertice}
+      PGDATABASE: ${POSTGRES_DB:-beholder}
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
       BACKUP_AT_HOUR_UTC: ${BACKUP_AT_HOUR_UTC:-3}
     volumes:
       - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
-      - vertice_backups:/var/backups/postgres
+      - beholder_backups:/var/backups/postgres
     entrypoint: ["/bin/sh", "/usr/local/bin/backup.sh"]
     networks: [internal]
     depends_on:
@@ -199,9 +199,9 @@ networks:
     driver: bridge
 
 volumes:
-  vertice_pgdata:
-    name: vertice_pgdata
-  vertice_backups:
-    name: vertice_backups
-  vertice_skills:
-    name: vertice_skills
+  beholder_pgdata:
+    name: beholder_pgdata
+  beholder_backups:
+    name: beholder_backups
+  beholder_skills:
+    name: beholder_skills

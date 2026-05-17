@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-# Tabelas do schema da Vértice que NUNCA devem ser expostas via Text-to-SQL
+# Tabelas do schema da Beholder que NUNCA devem ser expostas via Text-to-SQL
 # (seguem a mesma lista do schema_service para coerência semântica)
 _HIDDEN_TABLES = {
     "users", "roles", "permissions", "user_roles", "role_permissions",
@@ -61,7 +61,7 @@ class Text2SqlService:
             "..", "..", "text2sql",
         ))
         self._db_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "vertice.db")
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "beholder.db")
         )
 
     def _build_db(self, allowed_tables: list[str]):

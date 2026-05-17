@@ -1,4 +1,4 @@
-# Vértice — Caddy reverse proxy
+# Beholder — Caddy reverse proxy
 #
 # Dois modos suportados, ambos zero-config (Caddy decide pelas env vars):
 #
@@ -10,7 +10,7 @@
 #       avisa "certificado não confiável", aceite e segue).
 #
 #  2) MODO PRODUÇÃO (Let's Encrypt)
-#     DOMAIN=vertice.exemplo.com.br
+#     DOMAIN=beholder.exemplo.com.br
 #     ACME_EMAIL=ops@exemplo.com.br
 #     → Caddy emite cert real automaticamente; URL fica
 #       https://DOMAIN:PUBLIC_HTTPS_PORT.
@@ -94,7 +94,7 @@
 	}
 
 	# --- Reverse proxy para a app ---
-	reverse_proxy vertice:8000 {
+	reverse_proxy beholder:8000 {
 		header_up X-Real-IP {remote_host}
 		header_up X-Forwarded-For {remote_host}
 		header_up X-Forwarded-Proto {scheme}

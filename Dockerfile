@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# Vértice — imagem de produção.
+# Beholder — imagem de produção.
 # Multi-stage: 1) builder com toolchain pra compilar wheels nativos
 # (asyncpg, bcrypt, pandas), 2) runtime slim sem compilador.
 # Final: ~250MB, usuário não-root, healthcheck embutido.
@@ -51,7 +51,7 @@ RUN apt-get update \
         curl \
         tini \
  && rm -rf /var/lib/apt/lists/* \
- && useradd --create-home --shell /bin/bash --uid 10001 vertice
+ && useradd --create-home --shell /bin/bash --uid 10001 beholder
 
 WORKDIR ${APP_HOME}
 
@@ -62,13 +62,13 @@ RUN pip install --no-index --find-links=/wheels -r requirements.txt \
  && rm -rf /wheels
 
 # Copia o código já com owner correto. .dockerignore mantém imagem enxuta.
-COPY --chown=vertice:vertice . .
+COPY --chown=beholder:beholder . .
 
 # Diretório opcional para artefatos efêmeros que o app pode escrever
 # (downloads de presentations, uploads etc.). Mantemos no FS do container —
 # ephemeral por design; persistência real fica no Postgres.
 RUN mkdir -p ${APP_HOME}/data \
- && chown -R vertice:vertice ${APP_HOME}/data
+ && chown -R beholder:beholder ${APP_HOME}/data
 
 # Skills "shipped" no repo são copiados para um diretório read-only ao lado
 # de app/. No primeiro boot, o entrypoint copia-as para app/skills/ (que é
@@ -78,18 +78,18 @@ RUN mkdir -p ${APP_HOME}/data \
 #     boot) — o operador limpa o volume manualmente quando quiser sync.
 RUN mkdir -p /opt/skills_seed \
  && cp -r ${APP_HOME}/app/skills/. /opt/skills_seed/ 2>/dev/null || true \
- && chown -R vertice:vertice /opt/skills_seed
+ && chown -R beholder:beholder /opt/skills_seed
 
 # Entrypoint shim: seed skills no primeiro boot, depois exec uvicorn.
 # `sed` defensivo: se o checkout deste repo trouxe o script com CRLF
 # (cenário comum em Windows + git autocrlf), normaliza para LF — caso
 # contrário tini falha com "exec ...: No such file or directory" no
 # shebang `#!/bin/sh\r`.
-COPY --chown=vertice:vertice scripts/docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
+COPY --chown=beholder:beholder scripts/docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker_entrypoint.sh \
  && chmod +x /usr/local/bin/docker_entrypoint.sh
 
-USER vertice
+USER beholder
 
 EXPOSE 8000
 

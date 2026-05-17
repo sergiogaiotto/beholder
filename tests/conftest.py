@@ -2,7 +2,7 @@
 
 Estratégia:
   * Usa o `DATABASE_URL` configurado (ou um default local) e cria/derruba
-    UM SCHEMA dedicado por sessão de teste (`vertice_test_<pid>`).
+    UM SCHEMA dedicado por sessão de teste (`beholder_test_<pid>`).
   * Cada teste compartilha o schema, mas as tabelas são limpas com TRUNCATE
     em ordem reversa de dependência via fixture autouse `_reset_db_per_test`.
   * Schema é dropado (CASCADE) ao final da sessão.
@@ -13,7 +13,7 @@ TIMESTAMPTZ, ON CONFLICT etc. Não há equivalente in-memory de PostgreSQL.
 
 Variável de ambiente esperada:
   TEST_DATABASE_URL — DSN para o servidor PG de teste. Se ausente, tenta
-  postgresql://vertice:vertice@localhost:5432/vertice_test (compatível
+  postgresql://beholder:beholder@localhost:5432/beholder_test (compatível
   com docker-compose de dev).
 """
 
@@ -27,7 +27,7 @@ import asyncpg
 import pytest
 
 
-_DEFAULT_TEST_DSN = "postgresql://vertice:vertice@localhost:5432/vertice_test"
+_DEFAULT_TEST_DSN = "postgresql://beholder:beholder@localhost:5432/beholder_test"
 
 
 def _test_dsn() -> str:
@@ -56,7 +56,7 @@ def _isolated_test_schema(monkeypatch_session, event_loop):
     O schema isolado evita colisão entre execuções paralelas do pytest e
     deixa o banco de produção/dev intacto — tudo é dropado no teardown.
     """
-    schema = f"vertice_test_{uuid.uuid4().hex[:8]}"
+    schema = f"beholder_test_{uuid.uuid4().hex[:8]}"
     base_dsn = _test_dsn()
     # Sufixo `?options=-csearch_path=<schema>` configura search_path pra que
     # CREATE TABLE/INSERT/SELECT vão automaticamente para o schema isolado.

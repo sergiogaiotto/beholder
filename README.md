@@ -1,4 +1,4 @@
-# Vértice — Framework de Building Blocks de IA
+# Beholder — Framework de Building Blocks de IA
 
 Plataforma modular de agentes em Python/FastAPI seguindo Spec-Driven Development e arquitetura hexagonal. Cada funcionalidade é um *building block* registrado dinamicamente, com guardrails parametrizáveis (entrada → system prompt → saída), FinOps granular e observabilidade nativa.
 
@@ -45,8 +45,8 @@ Tudo que cruza a fronteira do core passa por uma porta. Adaptadores são plugáv
 ### Opção 1 — Docker Compose (recomendado)
 
 ```bash
-git clone https://github.com/sergiogaiotto/vertice.git
-cd vertice
+git clone https://github.com/sergiogaiotto/beholder.git
+cd beholder
 cp .env.example .env                                 # API keys (opcional)
 docker compose -f docker-compose.dev.yml up --build  # sobe Postgres + app
 ```
@@ -64,20 +64,20 @@ aplicados pelo `init_db()` no lifespan do FastAPI — idempotente.
 ### Opção 2 — Postgres local + venv
 
 ```bash
-git clone https://github.com/sergiogaiotto/vertice.git
-cd vertice
+git clone https://github.com/sergiogaiotto/beholder.git
+cd beholder
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 
-# pré-requisito: PostgreSQL 14+ rodando em postgresql://vertice:vertice@localhost:5432/vertice
-createdb vertice              # ou via psql / pgAdmin
+# pré-requisito: PostgreSQL 14+ rodando em postgresql://beholder:beholder@localhost:5432/beholder
+createdb beholder              # ou via psql / pgAdmin
 python scripts/init_db.py     # cria schema + seed + bootstrap
 uvicorn app.main:app --reload
 ```
 
 Acesse `http://localhost:8000`.
-Login default: `admin / vertice2026` (trocar imediatamente em produção).
+Login default: `admin / beholder2026` (trocar imediatamente em produção).
 
 Sem API keys configuradas, os adaptadores LLM rodam em **modo mock** — todas as funcionalidades da plataforma ficam navegáveis para desenvolvimento offline.
 
@@ -170,7 +170,7 @@ curl -fsSL https://raw.githubusercontent.com/SEU_USER/SEU_REPO/main/scripts/inst
      -o install_docker.sh && chmod +x install_docker.sh && ./install_docker.sh
 
 # como usuário deploy:
-git clone https://github.com/SEU_USER/SEU_REPO.git vertice && cd vertice
+git clone https://github.com/SEU_USER/SEU_REPO.git beholder && cd beholder
 cp .env.production.example .env.production && chmod 600 .env.production
 nano .env.production               # preencher TROCAR_*
 ./scripts/deploy.sh
@@ -187,10 +187,10 @@ CASCADE no teardown, então o banco usado fica limpo.
 
 ```bash
 # 1) Garanta que o Postgres de teste existe (uma vez):
-createdb vertice_test
+createdb beholder_test
 
 # 2) Aponte para ele e rode:
-export TEST_DATABASE_URL="postgresql://vertice:vertice@localhost:5432/vertice_test"
+export TEST_DATABASE_URL="postgresql://beholder:beholder@localhost:5432/beholder_test"
 pytest -q
 ```
 
@@ -198,8 +198,8 @@ Para usar o mesmo Postgres do `docker compose`:
 
 ```bash
 docker compose up -d postgres
-docker compose exec postgres createdb -U vertice vertice_test
-TEST_DATABASE_URL="postgresql://vertice:vertice@localhost:5432/vertice_test" pytest -q
+docker compose exec postgres createdb -U beholder beholder_test
+TEST_DATABASE_URL="postgresql://beholder:beholder@localhost:5432/beholder_test" pytest -q
 ```
 
 ## 12. Licença

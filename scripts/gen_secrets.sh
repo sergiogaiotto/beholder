@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Vértice — gera os secrets obrigatórios para o deploy.
+# Beholder — gera os secrets obrigatórios para o deploy.
 #
 # Uso (no seu terminal local — Git Bash, macOS Terminal, Linux ou WSL):
 #
@@ -38,7 +38,7 @@ printf "\n${GREEN}✓ Secrets gerados.${RESET}\n"
 printf "${DIM}Cole o bloco abaixo no painel Environment Variables do${RESET}\n"
 printf "${DIM}Hostinger Docker Manager (uma variável por linha):${RESET}\n\n"
 
-printf "${CYAN}# ===== Secrets obrigatórios — Vértice =====${RESET}\n"
+printf "${CYAN}# ===== Secrets obrigatórios — Beholder =====${RESET}\n"
 cat <<EOF
 APP_SECRET_KEY=${APP_SECRET_KEY}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -46,9 +46,9 @@ EOF
 
 printf "\n${CYAN}# ===== Opcionais — preencha quando configurar domínio =====${RESET}\n"
 cat <<EOF
-# DOMAIN=vertice.seu-dominio.com.br
+# DOMAIN=beholder.seu-dominio.com.br
 # ACME_EMAIL=seu@email.com
-# APP_BASE_URL=https://vertice.seu-dominio.com.br:8010
+# APP_BASE_URL=https://beholder.seu-dominio.com.br:8010
 # PUBLIC_HTTPS_PORT=8010
 EOF
 
