@@ -1,10 +1,25 @@
 # Beholder — SDD: Implementação Pendente
 
-**Versão**: 1.0
+**Versão**: 1.1
 **Data**: 2026-05-17
 **Status**: Aprovado para execução
-**Escopo**: Fase 0 (infra de escala) + Fases 1-7 (vertical Empreiteiras-WF)
+**Escopo**: Fase 0 (infra de escala) + Fases 1-7 + Fase 2.5 nova (analytics)
 **Precedente**: este documento sucede o `sdd.md` legado da raiz (herdado do fork Vértice). O legado fica como referência histórica e não é mais autoritário.
+
+### Changelog
+
+#### v1.1 (2026-05-17)
+
+Patch derivado de `docs/SDD_GAPS.md` após inventário real dos dados em `BEHOLDER_DATA_DIR`. Aprovado pelo user com D1-D5 conforme recomendação.
+
+- **+§3.2.13 `WFPayment`** — Analítico WF (869.663 × 81); fonte primária dos pagamentos WF1/WF2
+- **+§3.2.14 `PurchaseOrderGc`** — sheet "Contratos Guarda Chuvas" (44.782 × 13); destrava R6.6–6.9
+- **+§3.2.15 `CostCenterAccount`** — mapping centro_custo ↔ conta_razao (1.049 linhas)
+- **§7.2** — DDL das 3 novas tabelas; particionamento de `lpu_item` por ano (3,1M linhas reais vs 44k esperados)
+- **§9** — REGRA 3/4/5 revisadas; **REGRA 6 expandida para família 6.1–6.9** (9 sub-regras); **+REGRA 7** (analytics engine, 11 detectores)
+- **§10** — nota sobre R4 do DOCX como diretriz de extração (não check)
+- **§12** — Fase 1 +0,5 sem (parser MSRV5 + WF loader); **+Fase 2.5 nova** (analytics_engine, 1-2 sem); Fase 5 −0,5 sem (R5 simplificada)
+- **§14.2** — adiciona Analítico WF + MSRV5 + sheet Contratos GC
 
 ---
 
@@ -176,7 +191,7 @@ ContractMaster ───── 1..N ─── ContractVersion (aditivos)
    │                                │
    │                                │ 1..N
    │                                ▼
-   │                          LPUItem (tabela de preços extraída)
+   │                          LPUItem (tabela de preços extraída do PDF)
    │
    │ 1..N
    ▼
@@ -186,15 +201,33 @@ PurchaseOrderHeader (EKKO ───── 1..N ─── PurchaseOrderItem (EKPO
                                             ▼
                                       ServicePackage (ESLL: serviço x preço x qtd)
 
+WFPayment (Analítico WF 2025 — 869k linhas — fonte primária pagamentos) [v1.1]
+   │
+   │ refs (R6.1–6.5: WF × EKPO)
+   ▼
+PurchaseOrderHeader/Item
+   │
+   │ refs (R6.6–6.9: WF × GC)
+   ▼
+PurchaseOrderGc (44.782 — sheet "Contratos Guarda Chuvas") [v1.1]
+
+CostCenterAccount (1.049 — centro_custo ↔ conta_razao) [v1.1]
+
 ReconciliationRun (1 execução)
    │
    │ 1..N
    ▼
-ReconciliationFinding ──── refs ──── PurchaseOrderItem
+ReconciliationFinding ──── refs ──── PurchaseOrderItem / WFPayment
                                       ContractMaster (versão vigente na data)
                                       RuleDefinition
 
-RuleDefinition (catálogo — 7 regras inicialmente)
+AnalyticDetector (catálogo — 11 detectores R7) [v1.1]
+   │
+   │ 1..N
+   ▼
+AnalyticFinding (output do analytics_engine) [v1.1]
+
+RuleDefinition (catálogo — 15 regras: R1, R2, R3, R4, R5, R6.1–6.9, LPU) [v1.1]
 
 ExtractionJob (worker async, status pending/extracting/review/done/failed)
    │
@@ -372,7 +405,7 @@ Carregada de `ESLL - EXTRAÇÃO Nº DE PACOTES - LPU_VALORES.xlsx` (44.782 rows)
 
 #### 3.2.9. `RuleDefinition` — catálogo de regras
 
-7 linhas iniciais (REGRA 1, 2, 3, 4, 5, 6, LPU). Parametrizável via UI (threshold, ativo/inativo, severidade).
+**v1.1**: 15 linhas iniciais (REGRA 1, 2, 3, 4, 5, 6.1–6.9, LPU). Parametrizável via UI (threshold, ativo/inativo, severidade). REGRA 7 vive no catálogo análogo `AnalyticDetector` (§3.2.16).
 
 | Campo | Tipo Python | Tipo PG | Constraint | Notas |
 |---|---|---|---|---|
@@ -459,6 +492,114 @@ Worker dramatiq cria um para cada upload PDF. UI mostra progresso.
 | `error_message` | `str` | `TEXT` | NULL | |
 | `uploaded_by_id` | `UUID` | `UUID` | NOT NULL, FK → `users(id)` | |
 | `created_at` | `datetime` | `TIMESTAMPTZ` | DEFAULT NOW() | |
+
+#### 3.2.13. `WFPayment` — Analítico WF (fonte primária dos pagamentos) [v1.1]
+
+Carregada da sheet `Analitico_Empreiteiras_WF1_WF2_` em `Analitico_Empreiteiras_WF1_WF2_TOTAL_2025 2.txt.xlsx` (**869.663 linhas × 81 colunas**). Granularidade: 1 linha = 1 OS paga em 2025. Sistema de origem: WF1 ou WF2.
+
+Esta é a **fonte de verdade dos pagamentos** (substitui o papel que `purchase_order_item` exercia no SDD v1.0 para esse fim). As 5 sub-regras R6.1–6.5 batem `wf_payment` contra `purchase_order_item`; as 4 sub-regras R6.6–6.9 batem `wf_payment` contra `purchase_order_gc`.
+
+| Campo | Tipo Python | Tipo PG | Constraint | Notas |
+|---|---|---|---|---|
+| `id` | `int` | `BIGSERIAL PK` | NOT NULL | |
+| `os_num` | `str` | `TEXT` | NOT NULL, INDEX | "OS" — chave de negócio |
+| `sistema` | `str` | `TEXT` | NULL | "SISTEMA" — WF1 ou WF2 |
+| `pedido_num` | `str` | `TEXT` | NULL, INDEX | "PEDIDO_NUM" (R6.1 × EKPO.Documento de compras) |
+| `contrato_num` | `str` | `TEXT` | NULL, INDEX | "CONTRATO_NUM" (R6.3 × EKPO.Contrato básico; R6.6 × GC.Documento) |
+| `item_num` | `str` | `TEXT` | NULL | "ITEM_NUM" (R6.4 × EKPO.Item; R6.7 × GC.Item) |
+| `item_descricao` | `str` | `TEXT` | NULL | "ITEM_DESCRICAO" (R6.8 × GC.Texto breve) |
+| `data_pedido` | `date` | `DATE` | NULL, INDEX | "DATA_PEDIDO" (R6.2 × EKPO.Últ.modif.no dia) |
+| `valor_total_final` | `decimal` | `NUMERIC(18,2)` | NULL | "VALOR_TOTAL_FINAL" (R6.5 × EKPO.Valor líquido pedido) |
+| `valor_unitario` | `decimal` | `NUMERIC(18,4)` | NULL | "VALOR_UNITARIO" (R6.9 × GC.Preço bruto LPU, tolerância) |
+| `categoria` | `str` | `TEXT` | NULL | "CATEGORIA" (R5.e) |
+| `uf` | `str` | `TEXT` | NULL | "UF" (R5.a — match exato) |
+| `cidade` | `str` | `TEXT` | NULL | "CIDADE" (R5.b — match normalizado) |
+| `tecnologia` | `str` | `TEXT` | NULL | "TECNOLOGIA" (R5.c) |
+| `atividade` | `str` | `TEXT` | NULL | "ATIVIDADE" (R5.d) |
+| `empreiteira` | `str` | `TEXT` | NULL, INDEX | "EMPREITEIRA" |
+| `fase_atual` | `str` | `TEXT` | NULL | "FASE_ATUAL" |
+| `status_os` | `str` | `TEXT` | NULL | "STATUS_OS" |
+| `raw_extra` | `dict` | `JSONB` | NOT NULL, DEFAULT '{}' | demais ~66 colunas |
+| `ingestion_run_id` | `UUID` | `UUID` | NULL, FK → `payments.ingestion_run(id)` | rastreabilidade |
+| `created_at` | `datetime` | `TIMESTAMPTZ` | DEFAULT NOW() | |
+
+**Particionamento**: por mês de `data_pedido` (estimativa: ~70-80k linhas/mês). Permite drop de partições antigas após retenção definida.
+
+**Índices**: `(os_num)`, `(pedido_num)`, `(contrato_num)`, `(data_pedido)`, `(empreiteira)`. Compósito `(empreiteira, data_pedido)` para REGRA 7 (análises por empreiteira × período).
+
+#### 3.2.14. `PurchaseOrderGc` — Contratos Guarda Chuvas (cruzamento pré-processado) [v1.1]
+
+Carregada da sheet `Contratos Guarda Chuvas` em `Contratos - Empreteiras.xlsx` (**44.782 linhas × 13 colunas**). É o cruzamento EKPO + ESLL + LPU já pré-processado para os contratos guarda-chuva monitorados. Referenciada como "GC" no DOCX original (REGRA 6.6–6.9).
+
+| Campo | Tipo Python | Tipo PG | Constraint | Origem (sheet) |
+|---|---|---|---|---|
+| `id` | `UUID` | `UUID PK` | NOT NULL | gerado |
+| `documento_compras` | `str` | `TEXT` | NOT NULL, INDEX | "Documento de compras" (R6.6 × WF.contrato_num) |
+| `item` | `str` | `TEXT` | NOT NULL | "Item" (R6.7 × WF.item_num) |
+| `ult_modif_dia` | `date` | `DATE` | NULL | "Últ.modif.no dia" |
+| `texto_breve` | `str` | `TEXT` | NULL | "Texto breve" (R6.8 × WF.item_descricao) |
+| `empresa` | `str` | `TEXT` | NULL | "Empresa" |
+| `numero_pacote_ekpo` | `str` | `TEXT` | NULL | "Nº pacote (EKPO)" |
+| `pacote_esll` | `str` | `TEXT` | NULL | "Pacote (ESLL)" |
+| `inicio_validade` | `date` | `DATE` | NULL | "Início per.validade" |
+| `fim_validade` | `date` | `DATE` | NULL | "Fim da validade" |
+| `val_fix_cab` | `decimal` | `NUMERIC(15,2)` | NULL | "ValFix.(nível cab.)" |
+| `preco_bruto_lpu` | `decimal` | `NUMERIC(15,4)` | NULL | "Preço bruto (LPU)" (R6.9 × WF.valor_unitario, tolerância) |
+| `numero_servico` | `str` | `TEXT` | NULL, INDEX | "Nº de serviço" |
+| `texto_breve_servico` | `str` | `TEXT` | NULL | segunda coluna "Texto breve" (do serviço) |
+| `imported_at` | `datetime` | `TIMESTAMPTZ` | DEFAULT NOW() | |
+
+**Índices**: `(documento_compras, item)` UNIQUE, `(numero_servico)`.
+
+**Nota arquitetural (D1 aprovada)**: Fase 1 ingere como tabela física para destravar R6.6–6.9; Fase 3 reavalia se vira matview derivada de EKPO+ESLL+LPU. Até lá, é fonte canônica para o "GC".
+
+#### 3.2.15. `CostCenterAccount` — mapping centro_custo ↔ conta_razao [v1.1]
+
+Carregada da sheet `CC + CONTA` do Analítico WF (**1.049 linhas × 2 colunas**). Tabela de apoio para análises orçamentárias da REGRA 7.
+
+| Campo | Tipo Python | Tipo PG | Constraint |
+|---|---|---|---|
+| `id` | `int` | `SERIAL PK` | NOT NULL |
+| `centro_de_custo` | `str` | `TEXT` | NOT NULL, INDEX |
+| `conta_razao` | `str` | `TEXT` | NOT NULL |
+| `imported_at` | `datetime` | `TIMESTAMPTZ` | DEFAULT NOW() |
+
+#### 3.2.16. `AnalyticDetector` + `AnalyticFinding` — catálogo e output do analytics_engine [v1.1]
+
+Análogo paralelo a `RuleDefinition` + `ReconciliationFinding`, dedicado à REGRA 7 (detecção de desvios/anomalias). Vive em módulo separado `app/core/services/payments/analytics_engine.py` (ver Fase 2.5 em §12).
+
+**`AnalyticDetector`** — catálogo dos 11 detectores R7:
+
+| Campo | Tipo PG | Notas |
+|---|---|---|
+| `id` | `UUID PK` | |
+| `code` | `TEXT UNIQUE` | "R7_LPU_OUTLIER", "R7_NUMEROS_QUEBRADOS", etc. |
+| `name` | `TEXT` | nome humano |
+| `description` | `TEXT` | descrição do desvio detectado (do DOCX) |
+| `technique` | `TEXT` | "zscore"/"iqr"/"timeseries_outlier"/"clustering"/"sql_temporal" |
+| `severity` | `TEXT` | low/medium/high |
+| `is_active` | `BOOLEAN` | |
+| `threshold_params` | `JSONB` | ex.: `{"zscore_threshold": 2.5, "min_samples": 30}` |
+| `python_handler` | `TEXT` | dotted path |
+| `version` | `INTEGER` | |
+
+**`AnalyticFinding`** — output:
+
+| Campo | Tipo PG | Notas |
+|---|---|---|
+| `id` | `UUID PK` | |
+| `detector_id` | `UUID FK` | |
+| `detector_code` | `TEXT` | denormalizado |
+| `wf_payment_id` | `BIGINT FK` | payment analisado (pode ser NULL para findings agregados por empreiteira) |
+| `supplier_id` | `UUID FK` | |
+| `score` | `DOUBLE PRECISION` | score do desvio (z-score, distância, etc.) |
+| `expected_range` | `JSONB` | ex.: `{"min": 100, "max": 500, "method": "iqr"}` |
+| `actual_value` | `JSONB` | valor observado |
+| `evidence_payment_ids` | `BIGINT[]` | demais payments que sustentam o finding |
+| `status` | `TEXT` | open/in_analysis/accepted_fp/escalated/blocked |
+| `detected_at` | `TIMESTAMPTZ` | DEFAULT NOW() |
+
+**Decisão D2 aprovada**: separação física de catálogos (`rule_definition` ≠ `analytic_detector`) e findings (`reconciliation_finding` ≠ `analytic_finding`) porque paradigmas diferem — reconciliação é determinística por OS; analytics é estatística por agrupamento.
 
 ---
 
@@ -1025,23 +1166,51 @@ ALTER TABLE payments.contract_master
     FOREIGN KEY (current_version_id) REFERENCES payments.contract_version(id);
 
 -- ============================================================
--- LPUItem
+-- LPUItem [v1.1: particionado por data_documento — 3.1M linhas (MSRV5 completo)]
 -- ============================================================
 CREATE TABLE IF NOT EXISTS payments.lpu_item (
-    id                       UUID PRIMARY KEY,
-    contract_version_id      UUID NOT NULL REFERENCES payments.contract_version(id) ON DELETE CASCADE,
+    id                       BIGSERIAL,
+    contract_version_id      UUID REFERENCES payments.contract_version(id) ON DELETE CASCADE,
+    -- chaves SAP (do MSRV5 TXT)
+    documento_compras        TEXT NOT NULL,
+    item                     INTEGER,
     numero_servico           TEXT NOT NULL,
-    descricao                TEXT NOT NULL,
-    unidade_medida           TEXT,
-    preco_unitario           NUMERIC(15,4) NOT NULL,
+    data_documento           DATE NOT NULL,
+    -- valores
+    preco_unitario           NUMERIC(18,4) NOT NULL,
+    qtd_solicitada           NUMERIC(18,3),
     moeda                    TEXT NOT NULL DEFAULT 'BRL',
+    -- textuais
+    descricao                TEXT,
+    texto_breve              TEXT,
+    -- rastreabilidade (preenchido só quando origem é extração PDF)
     pagina_pdf               INTEGER,
     clausula_ref             TEXT,
-    extracted_by_llm         BOOLEAN NOT NULL DEFAULT TRUE,
-    confidence               DOUBLE PRECISION
-);
-CREATE INDEX idx_lpu_version ON payments.lpu_item(contract_version_id);
-CREATE INDEX idx_lpu_servico ON payments.lpu_item(numero_servico);
+    extracted_by_llm         BOOLEAN NOT NULL DEFAULT FALSE,
+    confidence               DOUBLE PRECISION,
+    -- origem
+    source                   TEXT NOT NULL CHECK (source IN ('msrv5','pdf','manual')) DEFAULT 'msrv5',
+    raw_extra                JSONB DEFAULT '{}'::jsonb,
+    PRIMARY KEY (id, data_documento)
+) PARTITION BY RANGE (data_documento);
+
+-- Partições por ano (volume estimado: 500k-700k linhas/ano)
+CREATE TABLE payments.lpu_item_2022 PARTITION OF payments.lpu_item
+    FOR VALUES FROM ('2022-01-01') TO ('2023-01-01');
+CREATE TABLE payments.lpu_item_2023 PARTITION OF payments.lpu_item
+    FOR VALUES FROM ('2023-01-01') TO ('2024-01-01');
+CREATE TABLE payments.lpu_item_2024 PARTITION OF payments.lpu_item
+    FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+CREATE TABLE payments.lpu_item_2025 PARTITION OF payments.lpu_item
+    FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
+CREATE TABLE payments.lpu_item_2026 PARTITION OF payments.lpu_item
+    FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+CREATE TABLE payments.lpu_item_default PARTITION OF payments.lpu_item DEFAULT;
+
+CREATE INDEX idx_lpu_version    ON payments.lpu_item(contract_version_id);
+CREATE INDEX idx_lpu_servico    ON payments.lpu_item(numero_servico);
+CREATE INDEX idx_lpu_doc_item   ON payments.lpu_item(documento_compras, item);
+CREATE INDEX idx_lpu_source     ON payments.lpu_item(source);
 
 -- ============================================================
 -- ContractClause + pgvector
@@ -1217,6 +1386,132 @@ CREATE TABLE IF NOT EXISTS payments.extraction_job (
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_extraction_status ON payments.extraction_job(status, created_at DESC);
+
+-- ============================================================
+-- WFPayment [v1.1: 869k linhas Analítico WF, particionado por data_pedido]
+-- ============================================================
+CREATE TABLE IF NOT EXISTS payments.wf_payment (
+    id                       BIGSERIAL,
+    -- chaves de negócio
+    os_num                   TEXT NOT NULL,
+    sistema                  TEXT,
+    pedido_num               TEXT,
+    contrato_num             TEXT,
+    item_num                 TEXT,
+    item_descricao           TEXT,
+    data_pedido              DATE NOT NULL,
+    -- valores
+    valor_total_final        NUMERIC(18,2),
+    valor_unitario           NUMERIC(18,4),
+    -- escopo estruturado (R5)
+    categoria                TEXT,
+    uf                       TEXT,
+    cidade                   TEXT,
+    tecnologia               TEXT,
+    atividade                TEXT,
+    -- contexto
+    empreiteira              TEXT,
+    fase_atual               TEXT,
+    status_os                TEXT,
+    raw_extra                JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ingestion_run_id         UUID,  -- FK adicionada após ingestion_run criada
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (id, data_pedido)
+) PARTITION BY RANGE (data_pedido);
+
+-- Partições por trimestre 2024-2026 (volume ~250k/trimestre)
+CREATE TABLE payments.wf_payment_2024_q4 PARTITION OF payments.wf_payment
+    FOR VALUES FROM ('2024-10-01') TO ('2025-01-01');
+CREATE TABLE payments.wf_payment_2025_q1 PARTITION OF payments.wf_payment
+    FOR VALUES FROM ('2025-01-01') TO ('2025-04-01');
+CREATE TABLE payments.wf_payment_2025_q2 PARTITION OF payments.wf_payment
+    FOR VALUES FROM ('2025-04-01') TO ('2025-07-01');
+CREATE TABLE payments.wf_payment_2025_q3 PARTITION OF payments.wf_payment
+    FOR VALUES FROM ('2025-07-01') TO ('2025-10-01');
+CREATE TABLE payments.wf_payment_2025_q4 PARTITION OF payments.wf_payment
+    FOR VALUES FROM ('2025-10-01') TO ('2026-01-01');
+CREATE TABLE payments.wf_payment_2026_q1 PARTITION OF payments.wf_payment
+    FOR VALUES FROM ('2026-01-01') TO ('2026-04-01');
+CREATE TABLE payments.wf_payment_2026_q2 PARTITION OF payments.wf_payment
+    FOR VALUES FROM ('2026-04-01') TO ('2026-07-01');
+CREATE TABLE payments.wf_payment_default PARTITION OF payments.wf_payment DEFAULT;
+
+CREATE INDEX idx_wf_os               ON payments.wf_payment(os_num);
+CREATE INDEX idx_wf_pedido           ON payments.wf_payment(pedido_num);
+CREATE INDEX idx_wf_contrato         ON payments.wf_payment(contrato_num);
+CREATE INDEX idx_wf_empreiteira_data ON payments.wf_payment(empreiteira, data_pedido);
+
+-- ============================================================
+-- PurchaseOrderGc [v1.1: 44.782 linhas — sheet "Contratos Guarda Chuvas"]
+-- ============================================================
+CREATE TABLE IF NOT EXISTS payments.purchase_order_gc (
+    id                       UUID PRIMARY KEY,
+    documento_compras        TEXT NOT NULL,
+    item                     TEXT NOT NULL,
+    ult_modif_dia            DATE,
+    texto_breve              TEXT,
+    empresa                  TEXT,
+    numero_pacote_ekpo       TEXT,
+    pacote_esll              TEXT,
+    inicio_validade          DATE,
+    fim_validade             DATE,
+    val_fix_cab              NUMERIC(15,2),
+    preco_bruto_lpu          NUMERIC(15,4),
+    numero_servico           TEXT,
+    texto_breve_servico      TEXT,
+    imported_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (documento_compras, item)
+);
+CREATE INDEX idx_gc_servico ON payments.purchase_order_gc(numero_servico);
+
+-- ============================================================
+-- CostCenterAccount [v1.1: 1.049 linhas — sheet "CC + CONTA"]
+-- ============================================================
+CREATE TABLE IF NOT EXISTS payments.cost_center_account (
+    id                       SERIAL PRIMARY KEY,
+    centro_de_custo          TEXT NOT NULL,
+    conta_razao              TEXT NOT NULL,
+    imported_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (centro_de_custo, conta_razao)
+);
+CREATE INDEX idx_cca_cc ON payments.cost_center_account(centro_de_custo);
+
+-- ============================================================
+-- AnalyticDetector + AnalyticFinding [v1.1: REGRA 7 — analytics_engine]
+-- ============================================================
+CREATE TABLE IF NOT EXISTS payments.analytic_detector (
+    id                       UUID PRIMARY KEY,
+    code                     TEXT NOT NULL UNIQUE,
+    name                     TEXT NOT NULL,
+    description              TEXT NOT NULL,
+    technique                TEXT NOT NULL,
+    severity                 TEXT NOT NULL CHECK (severity IN ('low','medium','high')),
+    is_active                BOOLEAN NOT NULL DEFAULT TRUE,
+    threshold_params         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    python_handler           TEXT NOT NULL,
+    version                  INTEGER NOT NULL DEFAULT 1,
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS payments.analytic_finding (
+    id                       UUID PRIMARY KEY,
+    detector_id              UUID NOT NULL REFERENCES payments.analytic_detector(id),
+    detector_code            TEXT NOT NULL,
+    wf_payment_id            BIGINT,
+    wf_payment_data_pedido   DATE,  -- denormalizado p/ join particionado
+    supplier_id              UUID REFERENCES payments.supplier_bridge(id),
+    score                    DOUBLE PRECISION NOT NULL,
+    expected_range           JSONB NOT NULL,
+    actual_value             JSONB NOT NULL,
+    evidence_payment_ids     BIGINT[],
+    status                   TEXT NOT NULL CHECK (status IN
+        ('open','in_analysis','accepted_fp','escalated','blocked')) DEFAULT 'open',
+    detected_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_af_inbox     ON payments.analytic_finding(status, severity, detected_at DESC);
+CREATE INDEX idx_af_supplier  ON payments.analytic_finding(supplier_id);
+CREATE INDEX idx_af_detector  ON payments.analytic_finding(detector_code, detected_at DESC);
 ```
 
 ### 7.3. Materialized Views — KPIs do dashboard
@@ -1300,21 +1595,154 @@ VALUES
      'medium', 'sql_deterministic',
      'app.core.services.payments.rules.regra_4_variaveis',
      '{}'::jsonb),
-    (gen_random_uuid(), 'REGRA_5', 'Objeto/Tecnologia/Atividade/UF/Cidade',
-     'Match semântico do escopo: OBJETO_CONTRATO, TECNOLOGIA, ATIVIDADE entre EKPO.texto_breve e contract_version',
-     'medium', 'embedding',
-     'app.core.services.payments.rules.regra_5_escopo',
-     '{"fuzzy_threshold": 0.85, "embedding_threshold": 0.75, "llm_judge_threshold": 0.6}'::jsonb),
-    (gen_random_uuid(), 'REGRA_6', 'WF CONTRATO_NUM × EKPO Contrato básico',
-     'Match entre contrato_num em WF e EKPO.contrato_basico',
-     'high', 'sql_deterministic',
-     'app.core.services.payments.rules.regra_6_wf_x_ekpo',
+    -- REGRA 5 v1.1: 5 dos 6 campos são SQL puro (WF tem estruturado); só 5.f usa cascata
+    (gen_random_uuid(), 'REGRA_5_UF', 'UF — match exato',
+     'wf_payment.uf deve = contract_version.uf vigente na data',
+     'medium', 'sql_deterministic',
+     'app.core.services.payments.rules.regra_5a_uf',
      '{}'::jsonb),
+    (gen_random_uuid(), 'REGRA_5_CIDADE', 'Cidade — match normalizado',
+     'wf_payment.cidade normalizada (lower, sem acento) deve estar em contract_version.cidade[]',
+     'medium', 'sql_deterministic',
+     'app.core.services.payments.rules.regra_5b_cidade',
+     '{}'::jsonb),
+    (gen_random_uuid(), 'REGRA_5_TECNOLOGIA', 'Tecnologia — exato + fuzzy',
+     'wf_payment.tecnologia ≈ contract_version.tecnologia (fuzzy ≥90)',
+     'medium', 'fuzzy',
+     'app.core.services.payments.rules.regra_5c_tecnologia',
+     '{"fuzzy_threshold": 0.90}'::jsonb),
+    (gen_random_uuid(), 'REGRA_5_ATIVIDADE', 'Atividade — exato + fuzzy',
+     'wf_payment.atividade ≈ contract_version.atividade (fuzzy ≥90)',
+     'medium', 'fuzzy',
+     'app.core.services.payments.rules.regra_5d_atividade',
+     '{"fuzzy_threshold": 0.90}'::jsonb),
+    (gen_random_uuid(), 'REGRA_5_CATEGORIA', 'Categoria — exato + fuzzy',
+     'wf_payment.categoria ≈ supplier_bridge.categoria (fuzzy ≥90)',
+     'medium', 'fuzzy',
+     'app.core.services.payments.rules.regra_5e_categoria',
+     '{"fuzzy_threshold": 0.90}'::jsonb),
+    (gen_random_uuid(), 'REGRA_5_OBJETO', 'Objeto — cascata híbrida (única que usa LLM)',
+     'OBJETO_DO_CONTRATO (PDF) vs wf_payment.item_descricao: fuzzy→embedding→LLM-judge',
+     'medium', 'embedding',
+     'app.core.services.payments.rules.regra_5f_objeto',
+     '{"fuzzy_threshold": 0.85, "embedding_threshold": 0.75, "llm_judge_threshold": 0.6}'::jsonb),
+    -- REGRA 6 v1.1: família de 9 sub-regras (WF×EKPO 6.1-6.5; WF×GC 6.6-6.9)
+    (gen_random_uuid(), 'REGRA_6_1', 'WF PEDIDO_NUM × EKPO Documento de compras',
+     'wf_payment.pedido_num deve existir em purchase_order_header.documento_compras',
+     'high', 'sql_deterministic',
+     'app.core.services.payments.rules.regra_6_1_pedido',
+     '{}'::jsonb),
+    (gen_random_uuid(), 'REGRA_6_2', 'WF DATA_PEDIDO × EKPO Últ.modif.no dia',
+     'wf_payment.data_pedido próxima de purchase_order_header.data_documento',
+     'medium', 'sql_deterministic',
+     'app.core.services.payments.rules.regra_6_2_data',
+     '{"date_tolerance_days": 7}'::jsonb),
+    (gen_random_uuid(), 'REGRA_6_3', 'WF CONTRATO_NUM × EKPO Contrato básico',
+     'wf_payment.contrato_num deve = purchase_order_header.contrato_basico do pedido',
+     'high', 'sql_deterministic',
+     'app.core.services.payments.rules.regra_6_3_contrato',
+     '{}'::jsonb),
+    (gen_random_uuid(), 'REGRA_6_4', 'WF ITEM_NUM × EKPO Item',
+     'wf_payment.item_num deve = purchase_order_item.item correspondente',
+     'medium', 'sql_deterministic',
+     'app.core.services.payments.rules.regra_6_4_item',
+     '{}'::jsonb),
+    (gen_random_uuid(), 'REGRA_6_5', 'WF VALOR_TOTAL_FINAL × EKPO Valor líquido pedido',
+     'wf_payment.valor_total_final ≈ purchase_order_item.valor_liquido (tolerância)',
+     'high', 'math_tolerance',
+     'app.core.services.payments.rules.regra_6_5_valor',
+     '{"tolerance_pct": 0.5}'::jsonb),
+    (gen_random_uuid(), 'REGRA_6_6', 'WF CONTRATO_NUM × GC Documento de compras',
+     'wf_payment.contrato_num deve existir em purchase_order_gc.documento_compras',
+     'high', 'sql_deterministic',
+     'app.core.services.payments.rules.regra_6_6_gc_contrato',
+     '{}'::jsonb),
+    (gen_random_uuid(), 'REGRA_6_7', 'WF ITEM_NUM × GC Item',
+     'wf_payment.item_num deve = purchase_order_gc.item do guarda-chuva',
+     'medium', 'sql_deterministic',
+     'app.core.services.payments.rules.regra_6_7_gc_item',
+     '{}'::jsonb),
+    (gen_random_uuid(), 'REGRA_6_8', 'WF ITEM_DESCRICAO × GC Texto breve',
+     'wf_payment.item_descricao ≈ purchase_order_gc.texto_breve (fuzzy ≥85)',
+     'medium', 'fuzzy',
+     'app.core.services.payments.rules.regra_6_8_gc_descricao',
+     '{"fuzzy_threshold": 0.85}'::jsonb),
+    (gen_random_uuid(), 'REGRA_6_9', 'WF VALOR_UNITARIO × GC Preço bruto (LPU)',
+     'wf_payment.valor_unitario ≈ purchase_order_gc.preco_bruto_lpu (tolerância)',
+     'high', 'math_tolerance',
+     'app.core.services.payments.rules.regra_6_9_gc_preco',
+     '{"tolerance_pct": 1.0}'::jsonb),
+    -- REGRA LPU (mantida — preço aplicado em ESLL × LPU do contract_version)
     (gen_random_uuid(), 'REGRA_LPU', 'Preço aplicado ↔ LPU',
-     'ESLL.preco_bruto deve bater com LPUItem.preco_unitario do contract_version vigente',
+     'service_package.preco_bruto deve bater com lpu_item.preco_unitario do contract_version vigente',
      'high', 'math_tolerance',
      'app.core.services.payments.rules.regra_lpu_preco',
      '{"tolerance_pct": 1.0}'::jsonb)
+ON CONFLICT (code) DO NOTHING;
+```
+
+### 7.5. Seed inicial (AnalyticDetector) [v1.1]
+
+REGRA 7 — 11 detectores estatísticos sobre histórico Analítico WF + EKPO:
+
+```sql
+INSERT INTO payments.analytic_detector (id, code, name, description, technique, severity, python_handler, threshold_params)
+VALUES
+    (gen_random_uuid(), 'R7_LPU_OUTLIER', 'LPU outlier por serviço',
+     'Diferenças relevantes de custo/volume para a mesma LPU',
+     'iqr', 'medium',
+     'app.core.services.payments.analytics.r7_lpu_outlier',
+     '{"iqr_factor": 1.5, "min_samples": 30}'::jsonb),
+    (gen_random_uuid(), 'R7_QTD_QUEBRADA', 'Números quebrados na qtd. de serviço',
+     'Quantidades fracionárias atípicas dentro da OS',
+     'heuristic', 'low',
+     'app.core.services.payments.analytics.r7_qtd_quebrada',
+     '{"decimal_places_max": 2}'::jsonb),
+    (gen_random_uuid(), 'R7_FIXO_VARIAVEL_ATIPICO', 'Variações atípicas em valores fixos/variáveis',
+     'Desvio entre proporção fixo/variável observada e contratada',
+     'zscore', 'medium',
+     'app.core.services.payments.analytics.r7_fixo_variavel',
+     '{"zscore_threshold": 2.0}'::jsonb),
+    (gen_random_uuid(), 'R7_PICO_FIM_PERIODO', 'Picos de consumo no fim de período',
+     'Concentração de pagamentos no último mês de validade do contrato',
+     'timeseries_outlier', 'medium',
+     'app.core.services.payments.analytics.r7_pico_fim_periodo',
+     '{"last_n_days": 30, "spike_threshold": 2.0}'::jsonb),
+    (gen_random_uuid(), 'R7_EMPREITEIRA_OUT_PADRAO', 'Empreiteira fora do padrão histórico',
+     'Comparação por empreiteira × pares do mesmo segmento (clustering)',
+     'clustering', 'medium',
+     'app.core.services.payments.analytics.r7_empreiteira_padrao',
+     '{"min_pairs": 5, "isolation_threshold": 0.7}'::jsonb),
+    (gen_random_uuid(), 'R7_LAG_EXECUCAO_PAGTO', 'Intervalo anormal execução × pagamento',
+     'Distribuição de lag por empreiteira; outliers individuais',
+     'zscore', 'low',
+     'app.core.services.payments.analytics.r7_lag_pagto',
+     '{"zscore_threshold": 2.5}'::jsonb),
+    (gen_random_uuid(), 'R7_PERIODOS_ATIPICOS', 'Concentração de pagamentos em períodos atípicos',
+     'Detecção de spikes temporais sem correlação com execução',
+     'timeseries_outlier', 'low',
+     'app.core.services.payments.analytics.r7_periodos_atipicos',
+     '{"window_days": 7, "spike_threshold": 3.0}'::jsonb),
+    (gen_random_uuid(), 'R7_RECORR_VARIAVEL', 'Recorrência excessiva de serviços variáveis',
+     'Razão variável/fixo > threshold contratual',
+     'ratio', 'medium',
+     'app.core.services.payments.analytics.r7_recorr_variavel',
+     '{"ratio_threshold": 1.5}'::jsonb),
+    (gen_random_uuid(), 'R7_CONSUMO_PERFIL', 'Consumo incompatível com perfil jurídico',
+     'Proporção fixo/variável agregada diverge do contrato vigente',
+     'ratio', 'medium',
+     'app.core.services.payments.analytics.r7_consumo_perfil',
+     '{"ratio_delta_threshold": 0.30}'::jsonb),
+    (gen_random_uuid(), 'R7_LPU_PADRAO_SERVICO', 'LPU fora do padrão para o serviço',
+     'Uso recorrente de LPU divergente da norma do tipo de serviço',
+     'zscore', 'medium',
+     'app.core.services.payments.analytics.r7_lpu_padrao',
+     '{"zscore_threshold": 2.0, "group_by": "atividade"}'::jsonb),
+    (gen_random_uuid(), 'R7_VALIDADE_VENCIDA', 'Uso de contrato após validade ou acima do orçado',
+     'wf_payment.data_pedido > contract_version.valid_to OU soma > val_fix_cab × meses',
+     'sql_temporal', 'high',
+     'app.core.services.payments.analytics.r7_validade_vencida',
+     '{}'::jsonb)
 ON CONFLICT (code) DO NOTHING;
 ```
 
@@ -1447,6 +1875,8 @@ beholder/
 
 ## 9. Rules Catalog
 
+**v1.1** — alinhado com DOCX original (Janeiro 2026, Controladoria Operacional). 16 regras determinísticas/híbridas (rules_engine) + 11 detectores estatísticos (analytics_engine — REGRA 7, §9.7).
+
 Para cada regra: input, lógica, threshold, output (FindingDraft).
 
 ### REGRA 1 — CNPJ match base ↔ PDF
@@ -1473,45 +1903,119 @@ Para cada regra: input, lógica, threshold, output (FindingDraft).
 - **Threshold**: `date_tolerance_days` (default 0)
 - **Output**: `expected_value={"valid_from": ..., "valid_to": ..., "val_fix_cab": ...}, actual_value=EKKO data`
 
-### REGRA 3 — Outros campos base ↔ PDF
+### REGRA 3 — Texto Breve + Preço LPU base ↔ PDF [v1.1: especificada]
+
+DOCX original: "Bater Base 'Contratos – Empreteiras' campos 'Texto Breve' e 'Preço bruto (LPU)' com o PDF."
 
 - **Engine**: `sql_deterministic`
 - **Severity**: medium
-- **Input**: campos auxiliares de `supplier_bridge` (categoria, empreiteira, etc.) vs metadata do `contract_version`
-- **Lógica**: simples join, sinaliza divergência
-- **Output**: ad-hoc
+- **Input**: `payments.purchase_order_gc` (sheet "Contratos Guarda Chuvas") × `payments.lpu_item` extraído do PDF (source='pdf')
+- **Lógica**:
+  ```sql
+  SELECT gc.documento_compras, gc.numero_servico,
+         gc.texto_breve AS base_texto, lpu.descricao AS pdf_texto,
+         gc.preco_bruto_lpu AS base_preco, lpu.preco_unitario AS pdf_preco
+  FROM payments.purchase_order_gc gc
+  JOIN payments.contract_master cm
+    ON cm.contrato_num_sap = gc.documento_compras AND cm.is_monitored
+  JOIN payments.contract_version cv ON cv.id = cm.current_version_id
+  JOIN payments.lpu_item lpu
+    ON lpu.contract_version_id = cv.id
+   AND lpu.numero_servico = gc.numero_servico
+   AND lpu.source = 'pdf'
+  WHERE
+    -- Texto breve divergente OU preço fora da tolerância
+    (gc.texto_breve <> lpu.descricao
+     OR ABS(gc.preco_bruto_lpu - lpu.preco_unitario) / NULLIF(lpu.preco_unitario,0) * 100
+        > %(tolerance_pct)s)
+  ```
+- **Threshold**: `tolerance_pct` (default 1.0)
+- **Output**: `expected_value={"texto_breve_pdf": ..., "preco_pdf": ...}, actual_value={"texto_breve_base": ..., "preco_base": ...}, delta_pct=...`
 
-### REGRA 4 — Variáveis extraídas (cobertura)
+### REGRA 4 — Cobertura de extração + diretriz de memorização [v1.1: dual]
+
+**DOCX original** (parte 1, diretriz não-check): "Memorizar escopo, região, valores fixos e variáveis para cada contrato para usar como base de avaliação." → cumprida pelo `extraction_service.py` (Fase 4) ao popular `contract_version` no aprove do HITL. **Não gera finding diretamente.**
+
+**Parte 2 (check derivada)**: alerta quando a extração ficou incompleta — preserva semântica da R4 do SDD v1.0.
 
 - **Engine**: `sql_deterministic`
 - **Severity**: medium
-- **Input**: `contract_version` — campos `objeto_contrato`, `tecnologia`, `atividade`, `uf`, `cidade`, `val_fix_cab`
-- **Lógica**: alerta se `current_version` tem >2 campos NULL (extração incompleta)
+- **Input**: `contract_version` (current_version_id dos `contract_master` monitorados)
+- **Lógica**: alerta se `current_version` tem >2 campos NULL entre `objeto_contrato`, `tecnologia`, `atividade`, `uf`, `cidade`, `val_fix_cab`.
 - **Output**: lista de campos faltantes
 
-### REGRA 5 — Escopo: OBJETO/TECNOLOGIA/ATIVIDADE/UF/CIDADE
+### REGRA 5 — Escopo (família 5.a–5.f) [v1.1: 5 SQL + 1 cascata]
 
-- **Engine**: `embedding` (híbrida)
-- **Severity**: medium
-- **Input**: `purchase_order_item.texto_breve`, `contract_version.objeto_contrato/tecnologia/atividade/uf/cidade`
-- **Lógica**:
-  1. **UF/Cidade**: normalizar e match exato. Mismatch → finding direto (alta confiança).
-  2. **OBJETO/TECNOLOGIA/ATIVIDADE**: cascata híbrida (decidido na conversa):
-     - **Etapa 1 — fuzzy (RapidFuzz)**: `partial_ratio(texto_breve_normalizado, objeto_normalizado)` — se ≥85, considera match. Se 50-85, vai etapa 2.
-     - **Etapa 2 — embedding (pgvector)**: cosine similarity entre embedding(texto_breve) e embedding(objeto). Se ≥0.75, match. Se 0.5-0.75, etapa 3.
-     - **Etapa 3 — LLM-judge (ClaroHub)**: pergunta direto "este item de pagamento ('TEXTO BREVE') está dentro do escopo de objeto/tecnologia/atividade do contrato ('OBJETO')? Responda SIM/NÃO + 1 linha justificando." Score 0..1.
-  3. Decisão final: usa o método com **maior score** (parametrizável via `RuleDefinition.threshold_params`).
-- **Threshold**: `fuzzy_threshold` (0.85), `embedding_threshold` (0.75), `llm_judge_threshold` (0.6) — todos parametrizáveis
-- **Output**: `expected_value={"objeto": ..., "scope_method": "fuzzy"|"embedding"|"llm_judge", "score": 0.42}, actual_value={"texto_breve": ...}`
-- **Cost ledger**: cada LLM-judge call registra em `finops_ledger` com `domain='payments', agent='regra_5_judge'`
+DOCX original lista 6 campos para comparar com PDF do ARIBA. O Analítico WF tem **5 desses 6 estruturados** (UF, CIDADE, TECNOLOGIA, ATIVIDADE, CATEGORIA), então só 1 (OBJETO_DO_CONTRATO) precisa NLP. Decisão **D3 aprovada**: cascata só em 5.f; outros 5 são SQL puro.
 
-### REGRA 6 — WF CONTRATO_NUM × EKPO contrato_basico
+**Input comum**: `payments.wf_payment` × `payments.contract_version` (vigente em `wf_payment.data_pedido`).
 
-- **Engine**: `sql_deterministic`
-- **Severity**: high
-- **Input**: `purchase_order_header.contrato_basico`, `supplier_bridge.contrato_num_sap`, `purchase_order_item.documento_compras`
-- **Lógica**: para cada `PurchaseOrderHeader` que é pedido (`categoria_doc <> 'K'`), o `contrato_basico` deve apontar para um documento `K` cujo `documento_compras` está em `supplier_bridge.contrato_num_sap`.
-- **Output**: indica pedido órfão (sem guarda-chuva monitorado)
+| Sub | Campo | Engine | Threshold | Lógica resumida |
+|---|---|---|---|---|
+| 5.a | `uf` | `sql_deterministic` | none | `wf.uf = cv.uf` (após uppercase) |
+| 5.b | `cidade` | `sql_deterministic` | none | `normalize(wf.cidade)` ∈ `array(normalize(cv.cidade[]))` (lower, sem acento/hífen) |
+| 5.c | `tecnologia` | `fuzzy` (RapidFuzz) | `fuzzy_threshold=0.90` | `partial_ratio(wf.tecnologia, cv.tecnologia) < 90` → finding |
+| 5.d | `atividade` | `fuzzy` | `0.90` | idem |
+| 5.e | `categoria` | `fuzzy` (vs `supplier_bridge.categoria`) | `0.90` | idem |
+| 5.f | `objeto_contrato` × `wf.item_descricao` | cascata `fuzzy → embedding → llm_judge` | múltiplos | cascata híbrida; método com maior score decide |
+
+**Detalhe da cascata 5.f:**
+
+1. **Etapa 1 — fuzzy (RapidFuzz)**: `partial_ratio(item_descricao_normalizado, objeto_normalizado)` — se ≥85, match. Se 50-85, etapa 2.
+2. **Etapa 2 — embedding (pgvector)**: cosine similarity entre embedding(item_descricao) e embedding(objeto_contrato). Se ≥0.75, match. Se 0.5-0.75, etapa 3.
+3. **Etapa 3 — LLM-judge (Maritaca sabia-4 default, ClaroHub fallback)**: prompt "este item de pagamento ('ITEM_DESCRICAO') está dentro do escopo do objeto contratado ('OBJETO')? Responda SIM/NÃO + justificativa 1 linha." Score 0..1.
+
+**Cost ledger**: cada LLM-judge call registra em `finops_ledger` com `domain='payments', agent='regra_5f_judge'`.
+
+**Output (5.f)**: `expected_value={"objeto": ..., "scope_method": "fuzzy"|"embedding"|"llm_judge", "score": 0.42}, actual_value={"item_descricao": ...}`
+
+### REGRA 6 — Batimento WF × EKPO × GC (família 6.1–6.9) [v1.1: expandida]
+
+DOCX original especifica 3 fontes (WF = Analítico, EKPO = pedidos SAP, GC = sheet Contratos Guarda Chuvas) e 9 batimentos. Cada sub-regra é um `RuleDefinition` independente.
+
+**Bloco A — Validar itens do pedido (WF × EKPO):**
+
+| Sub | WF | × | EKPO/Header | Engine | Severity | Lógica |
+|---|---|---|---|---|---|---|
+| 6.1 | `pedido_num` | × | `purchase_order_header.documento_compras` | `sql_deterministic` | high | LEFT JOIN; finding se EKPO faltando |
+| 6.2 | `data_pedido` | × | `purchase_order_header.data_documento` | `sql_deterministic` | medium | tolerância de dias |
+| 6.3 | `contrato_num` | × | `purchase_order_header.contrato_basico` | `sql_deterministic` | high | match exato no contrato básico |
+| 6.4 | `item_num` | × | `purchase_order_item.item` | `sql_deterministic` | medium | join por `(documento, item)` |
+| 6.5 | `valor_total_final` | × | `purchase_order_item.valor_liquido` | `math_tolerance` | high | `tolerance_pct=0.5` |
+
+**Bloco B — Validar contrato (WF × GC):**
+
+| Sub | WF | × | GC | Engine | Severity | Lógica |
+|---|---|---|---|---|---|---|
+| 6.6 | `contrato_num` | × | `purchase_order_gc.documento_compras` | `sql_deterministic` | high | GC tem que conter o contrato |
+| 6.7 | `item_num` | × | `purchase_order_gc.item` | `sql_deterministic` | medium | join `(documento, item)` |
+| 6.8 | `item_descricao` | × | `purchase_order_gc.texto_breve` | `fuzzy` | medium | `fuzzy_threshold=0.85` |
+| 6.9 | `valor_unitario` | × | `purchase_order_gc.preco_bruto_lpu` | `math_tolerance` | high | `tolerance_pct=1.0` (alinhado com REGRA LPU) |
+
+**Skeleton compartilhado (Python):**
+
+```python
+def regra_6_sub(wf: WFPayment, params: dict) -> Iterable[FindingDraft]:
+    # template comum: resolve match, compara, emite finding com expected/actual
+    target = resolve_target(wf)  # EKPO ou GC dependendo da sub
+    if target is None:
+        yield FindingDraft(
+            rule_code=self.code,
+            reason='target_inexistente',
+            expected_value=expected_from_wf(wf),
+            actual_value=None,
+        )
+        return
+    cmp_result = compare(wf, target, params)
+    if not cmp_result.match:
+        yield FindingDraft(
+            rule_code=self.code,
+            expected_value=cmp_result.expected,
+            actual_value=cmp_result.actual,
+            delta_pct=cmp_result.delta_pct,
+            value_at_risk_brl=cmp_result.var,
+        )
+```
 
 ### REGRA LPU — Preço aplicado ↔ LPU
 
@@ -1545,6 +2049,34 @@ Para cada regra: input, lógica, threshold, output (FindingDraft).
 - **Threshold**: `tolerance_pct` (default 1.0) — parametrizável
 - **Output**: detalhado, com value_at_risk_brl calculado
 
+### 9.7. REGRA 7 — Analytics Engine (11 detectores) [v1.1: nova]
+
+Detecção de **desvios e anomalias** sobre histórico do Analítico WF (869k linhas 2025). Vive em módulo separado `app/core/services/payments/analytics_engine.py`. Cada detector é um `AnalyticDetector` que produz `AnalyticFinding` (§3.2.16).
+
+Diferenças importantes vs Rules Engine:
+- **Granularidade**: agrupada (por serviço, empreiteira, período) — não por OS individual
+- **Output**: `score` numérico + `expected_range` (não match/no-match binário)
+- **Tabela alvo**: `analytic_finding` (não `reconciliation_finding`)
+- **Inbox**: lista separada na UI (`/payments/empreiteiras-wf/desvios`)
+
+| Code | Nome | Técnica | Severity | Inputs principais |
+|---|---|---|---|---|
+| `R7_LPU_OUTLIER` | LPU outlier por serviço | IQR (factor 1.5) | medium | `wf_payment` + `lpu_item`, agrupado por `numero_servico` |
+| `R7_QTD_QUEBRADA` | Números quebrados em qtd. | Heurística (decimais > 2) | low | `service_package.qtd_solicitada` |
+| `R7_FIXO_VARIAVEL_ATIPICO` | Variação fixo/variável | Z-score | medium | `wf_payment` agrupado por contrato/mês |
+| `R7_PICO_FIM_PERIODO` | Pico no fim do contrato | Time series outlier (últimos 30d vs média) | medium | `wf_payment` × `contract_version.valid_to` |
+| `R7_EMPREITEIRA_OUT_PADRAO` | Empreiteira fora do padrão | Clustering (isolation forest) | medium | `wf_payment` agregado por empreiteira × segmento |
+| `R7_LAG_EXECUCAO_PAGTO` | Lag execução×pagamento | Z-score sobre distribuição por empreiteira | low | `wf_payment.data_pedido` − execução (campo WF) |
+| `R7_PERIODOS_ATIPICOS` | Pagamentos concentrados | Time series outlier (window 7d) | low | `wf_payment.data_pedido` |
+| `R7_RECORR_VARIAVEL` | Recorrência variável excessiva | Razão variável/fixo > threshold | medium | `wf_payment` × `contract_version.val_fix_cab` |
+| `R7_CONSUMO_PERFIL` | Consumo incompatível com perfil | Razão fixa/variável agregada vs contratada | medium | agregado por contrato |
+| `R7_LPU_PADRAO_SERVICO` | LPU fora do padrão por atividade | Z-score por `atividade` | medium | `wf_payment.valor_unitario` agrupado por atividade |
+| `R7_VALIDADE_VENCIDA` | Uso pós-validade ou acima do orçado | SQL temporal | high | `wf_payment.data_pedido` × `contract_version.valid_from/to` × `val_fix_cab` |
+
+**Frequência**: detectores rodam **diariamente** (cron via dramatiq) sobre janela móvel 90 dias. Findings novos aparecem no inbox de Desvios.
+
+**Coexistência com Rules Engine**: ambos rodam em paralelo após ingestão; o usuário decide individualmente em cada finding (não há blocagem entre R1–R6.9 e R7).
+
 ---
 
 ## 10. Skills & Prompts Catalog
@@ -1555,15 +2087,17 @@ Cada skill é um `SKILL.md` em `app/skills/` (padrão Vértice herdado). Prompts
 
 #### `extracao_folha_de_rosto.md`
 
+**Implementa R4 do DOCX original** (diretriz: "memorizar escopo, região, valores fixos e variáveis para cada contrato"). A skill **não gera finding** — ela popula `contract_version` no aprove do HITL para que as outras regras tenham base de comparação. A R4 de check (cobertura) em §9 é derivada — só dispara se essa skill deixar >2 campos NULL.
+
 Identidade: "Especialista em extração de folha de rosto de contrato jurídico de empreiteira (telecom Brasil)."
 
 Inputs:
 - `markdown_pdf` (string) — output de docling
 - `tables_pdf` (json) — tabelas detectadas
 
-Saída esperada: JSON conforme schema `FolhaDeRosto` (Pydantic). Cada campo com `value` e `confidence` (0..1).
+Saída esperada: JSON conforme schema `FolhaDeRosto` (Pydantic). Cada campo com `value` e `confidence` (0..1). Campos obrigatórios da R4 do DOCX: `objeto_contrato`, `tecnologia`, `atividade`, `uf[]`, `cidade[]`, `val_fix_cab`, `valid_from`, `valid_to`.
 
-Política de roteamento: Default ClaroHub `openai/gpt-oss-20b` (raciocínio); fallback `sabia-4`.
+Política de roteamento [v1.1]: Default **Maritaca sabia-4** (PT-BR nativo, qualidade > custo conforme política do projeto); fallback ClaroHub `openai/gpt-oss-20b`.
 
 Guardrails:
 - Entrada: max_chars=200000 (truncate antes do prompt)
@@ -1591,13 +2125,15 @@ Saída esperada: JSON list de `{secao, clausula_numero, texto, pagina}` para ger
 
 #### `reconciliacao_escopo_semantico.md`
 
-Identidade: "Juiz semântico para validar escopo de pagamento × cláusula contratual."
+**v1.1**: usado **apenas pela REGRA 5.f** (OBJETO_DO_CONTRATO). Os outros 5 campos da R5 (UF, Cidade, Tecnologia, Atividade, Categoria) são determinísticos/fuzzy puro — não chamam essa skill.
 
-Inputs: `texto_breve_ekpo`, `objeto_contrato`, `tecnologia`, `atividade`.
+Identidade: "Juiz semântico para validar se uma OS está dentro do objeto contratado."
+
+Inputs: `item_descricao` (de `wf_payment`), `objeto_contrato` (de `contract_version`).
 
 Saída esperada: `{match: bool, score: float, rationale: string}`.
 
-Política: ClaroHub default (raciocínio), Maritaca fallback.
+Política [v1.1]: **Maritaca sabia-4** default (PT-BR é nativo, qualidade primeiro); ClaroHub fallback.
 
 Guardrails: rationale max 200 chars; score em [0,1].
 
@@ -1661,34 +2197,37 @@ Conforme cenários A/B/C já validados no plano (não repetir aqui).
 
 ---
 
-## 12. Phase Plan (8 fases)
+## 12. Phase Plan (9 fases) [v1.1: +Fase 2.5]
 
 Cada fase tem entregáveis + acceptance + gate (só avança se passar).
 
 | Fase | Duração | Entregáveis | Acceptance gate |
 |---|---|---|---|
 | **0 — Fundação de isolamento** | 1-2 sem | Schema `payments`, pool dedicado, Redis, worker dramatiq, port `DocumentStore` + 2 adapters, telemetria por domínio, materialized view stub | 10 uploads paralelos não degradam p95 dos endpoints existentes >10% (k6) |
-| **1 — Modelo + Ingestão XLSX** | 2 sem | 12 entidades + migrations, 7 projetions YAML, dlt/Polars loader, repos | Carga dos 7 XLSX (~120k rows) em <60s; carga idempotente |
-| **2 — Rules engine MVP** | 1-2 sem | `reconciliation_engine.py`, regras 1, 2, 6, LPU implementadas, tabela `reconciliation_finding` | 261 OS processadas em <30s; cada regra com ≥5 fixtures; cobertura ≥90% |
-| **3 — Dashboard MVP** | 1 sem | Página `/payments/empreiteiras-wf` com 9 KPIs do mockup + 3 charts + tabela | Dashboard carrega <1s mesmo com 100k linhas; matview refresh <5s |
+| **1 — Modelo + Ingestão XLSX/TXT** [v1.1: +0,5 sem] | **2,5 sem** | **15 entidades** + migrations (com particionamento `wf_payment` e `lpu_item`), 7 projetions YAML + parser MSRV5, **parser Analítico WF (streaming 869k linhas)**, dlt/Polars loader, repos | Carga dos 7 XLSX (~120k rows) + Analítico WF (869k) + MSRV5 (3,1M) em <5 min; idempotente |
+| **2 — Rules engine MVP** | 1-2 sem | `reconciliation_engine.py`, regras **1, 2, 3, 4, 5.a–5.e, 6.1–6.9, LPU** (14 regras determinísticas/fuzzy), tabela `reconciliation_finding` | 1.000 OS WF processadas em <30s; cada regra com ≥5 fixtures; cobertura ≥90% |
+| **2.5 — Analytics engine (REGRA 7)** [v1.1: nova] | **1-2 sem** | `analytics_engine.py`, 11 detectores estatísticos, tabela `analytic_finding`, cron diário dramatiq | 869k linhas processadas em <5 min; ≥3 dos 11 detectores produzem findings reais; precisão ≥70% em sample de 30 findings revisados |
+| **3 — Dashboard MVP** | 1 sem | Página `/payments/empreiteiras-wf` com 9 KPIs do mockup + 3 charts + tabela + **aba Desvios (R7)** | Dashboard carrega <1s mesmo com 1M linhas WF; matview refresh <10s |
 | **4 — Extração PDF + HITL** | 2-3 sem | `extraction_service.py` (docling + Instructor + pgvector), tela de revisão com confidence | 5 PDFs reais extraídos; ≥85% campos pós-HITL; cost ≤R$15/PDF |
-| **5 — Reconciliação semântica (REGRA 5)** | 1-2 sem | RapidFuzz + pgvector + LLM-judge com score híbrido (escolha automática do método com maior score) | UF/Cidade exato = 100%; Objeto/Tec/Ativ: precisão ≥80%, recall ≥70% em 50 amostras anotadas |
+| **5 — Reconciliação semântica (REGRA 5.f)** [v1.1: −0,5 sem] | **1 sem** | RapidFuzz + pgvector + LLM-judge **apenas para OBJETO_DO_CONTRATO** (5.a-5.e já estão na Fase 2) | Objeto: precisão ≥80%, recall ≥70% em 50 amostras anotadas |
 | **6 — UX completa (Inbox + ações + bulk)** | 2 sem | Jornada J1 end-to-end com 3 perfis (RBAC), bulk actions, comentários, audit | Analista resolve 20 findings em <30min em teste de usabilidade |
 | **7 — Validação de concorrência (gate final)** | 1 sem | Load tests k6: cenários A/B/C combinados | SLO p95 <500ms sob carga combinada em **todos** os domínios |
 
-**Total: 11-15 semanas** para POC validada com dados reais.
+**Total v1.1: 12-16 semanas** (era 11-15 na v1.0) — Fase 2.5 nova adiciona ~1 sem; Fase 1 +0,5 sem (parsers MSRV5/WF); Fase 5 −0,5 sem (simplificação R5).
 
-### 12.1. Dependências entre fases
+### 12.1. Dependências entre fases [v1.1]
 
 ```
-Fase 0 ──→ Fase 1 ──→ Fase 2 ──→ Fase 3
-              │           │          │
-              └──→ Fase 4 ──→ Fase 5 ──→ Fase 6 ──→ Fase 7
-                                          ↑
-                                   tudo converge aqui
+Fase 0 ──→ Fase 1 ──┬──→ Fase 2 ───→ Fase 3
+                    │       │
+                    ├──→ Fase 2.5 (R7 analytics)
+                    │       │
+                    └──→ Fase 4 ──→ Fase 5 ──→ Fase 6 ──→ Fase 7
+                                                  ↑
+                                           tudo converge aqui
 ```
 
-Fase 4 (extração PDF) e Fase 2 (rules engine) podem rodar em paralelo APÓS Fase 1.
+Fase 4 (extração PDF), Fase 2 (rules engine R1–R6+LPU) e **Fase 2.5 (analytics R7)** podem rodar em paralelo APÓS Fase 1. As 3 entram em Fase 3 (dashboard) com suas tabelas de finding prontas.
 
 ### 12.2. Stop conditions (replan se atingir)
 
@@ -1749,17 +2288,26 @@ Fase 4 (extração PDF) e Fase 2 (rules engine) podem rodar em paralelo APÓS Fa
 | CONTRATO_NUM | identificador do contrato no SAP (ex.: 5700017041) |
 | REF WS | referência do contrato no Workflow (ex.: CW149898) |
 
-### 14.2. XLSX schemas confirmados (mapeamento sumário)
+### 14.2. Source-to-target mapping completo [v1.1: ampliado]
 
-| Arquivo | Rows × Cols | Para tabela |
-|---|---|---|
-| Contratos - Empreteiras.xlsx | 147 × 6 | `supplier_bridge` |
-| EKKO - EXTRAÇÃO CONTRATOS GUARDA CHUVAS.xlsx | 138 × 179 | `purchase_order_header` (filter categoria_doc='K') |
-| EKKO - SAP (Extração pedidos).MHTML.xlsx | 1.894 × 179 | `purchase_order_header` (filter pedidos) |
-| EKPO - EXTRAÇÃO CONTRATOS GUARDA CHUVAS.xlsx | 44.782 × 283 | `purchase_order_item` (guarda-chuva) |
-| EKPO - SAP (Extração pedidos).MHTML.xlsx | 25.067 × 283 | `purchase_order_item` (pedidos) |
-| ESLL - EXTRAÇÃO Nº DE PACOTES - LPU_VALORES.xlsx | 44.782 × 10 | `service_package` (com preços) |
-| ESLL - EXTRAÇÃO EKPO_ESLL Nº DE PACOTES.xlsx | 44.782 × 3 | enriquecimento (join EKPO ↔ ESLL) |
+Fonte autoritativa: `docs/DATA_INVENTORY.md` (gerado por `scripts/inventory_data.py`).
+
+| Arquivo (em `$BEHOLDER_DATA_DIR/`) | Sheet/Seção | Rows × Cols | Para tabela | Notas |
+|---|---|---|---|---|
+| `Contratos - Empreteiras.xlsx` | Empreiteiras | 147 × 6 | `supplier_bridge` | DE-PARA |
+| `Contratos - Empreteiras.xlsx` | **Contratos Guarda Chuvas** [v1.1] | **44.782 × 13** | **`purchase_order_gc`** (nova) | cruzamento pré-processado EKPO+ESLL+LPU |
+| `EKKO - EXTRAÇÃO CONTRATOS GUARDA CHUVAS.xlsx` | Sheet1 | 138 × 179 | `purchase_order_header` (filter categoria_doc='K') | |
+| `EKKO - SAP (Extração pedidos).MHTML.xlsx` | Sheet1 | 1.894 × 179 | `purchase_order_header` (filter pedidos) | |
+| `EKPO - EXTRAÇÃO CONTRATOS GUARDA CHUVAS.xlsx` | Sheet1 | 44.782 × 283 | `purchase_order_item` (guarda-chuva) | |
+| `EKPO - SAP (Extração pedidos).MHTML.xlsx` | Sheet1 | 25.067 × 283 | `purchase_order_item` (pedidos) | |
+| `ESLL - EXTRAÇÃO Nº DE PACOTES - LPU_VALORES.xlsx` | Sheet1 | 44.782 × 10 | `service_package` (preços) + sanity check `lpu_item` | subset do MSRV5 |
+| `ESLL - EXTRAÇÃO EKPO_ESLL Nº DE PACOTES.xlsx` | Sheet1 | 44.782 × 3 | enriquecimento (join EKPO ↔ ESLL) | |
+| **`MSRV5 - EXTRAÇÃO LPU.txt`** [v1.1] | (texto SAP pipe-delimited) | **3.103.381 linhas** (2.909.412 registros + paginação) | **`lpu_item` (fonte autoritativa, source='msrv5')** | parser dedicado `scripts/parse_msrv5.py` |
+| **`Analitico_Empreiteiras_WF1_WF2_TOTAL_2025 2.txt.xlsx`** [v1.1] | `Analitico_Empreiteiras_WF1_WF2_` | **869.663 × 81** | **`wf_payment`** (nova) | streaming via openpyxl read_only |
+| `Analitico_...xlsx` | `CC + CONTA` | 1.049 × 2 | **`cost_center_account`** (nova) | |
+| `Analitico_...xlsx` | `Casos Selecionados` | 339 × 12 | `tests/payments/fixtures/casos_selecionados.csv` (ground truth Controladoria) | **D4 aprovada**: vai pra fixtures, não DB |
+| `CONTRATOS/<empreiteira>/CW*.zip` | PDFs assinados | 58 ZIPs / 60 PDFs (166 MB) | `contract_version` (via Fase 4 extração PDF) | |
+| `Regras - POC … .docx` | — | — | (referência humana, não ingerido) | base do Rules Catalog v1.1 |
 
 ### 14.3. Referências externas
 
