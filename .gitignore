@@ -51,6 +51,11 @@ backups/
 FILES/
 beholder_data/
 
+# Outputs de probes/spikes — contem amostras de dados reais (CNPJs, contratos, precos)
+# DATA_INVENTORY.json fica versionado (so hashes/metadata, sem dados de negocio)
+docs/probe_*.json
+docs/spike_*.json
+
 # Caddy persistente (TLS certs/state) — fica no volume Docker, não no repo
 caddy_data/
 caddy_config/

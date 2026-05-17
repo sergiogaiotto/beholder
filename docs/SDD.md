@@ -1,12 +1,25 @@
 # Beholder — SDD: Implementação Pendente
 
-**Versão**: 1.1
+**Versão**: 1.1.1
 **Data**: 2026-05-17
 **Status**: Aprovado para execução
 **Escopo**: Fase 0 (infra de escala) + Fases 1-7 + Fase 2.5 nova (analytics)
 **Precedente**: este documento sucede o `sdd.md` legado da raiz (herdado do fork Vértice). O legado fica como referência histórica e não é mais autoritário.
 
 ### Changelog
+
+#### v1.1.1 (2026-05-17)
+
+Patch derivado de `docs/PRE_B_FINDINGS.md` + `docs/PRE_C_FINDINGS.md`. Validações empíricas com dados reais.
+
+- **§3.1 diagrama**: nota — OBJETO_DO_CONTRATO em WF tem 598 valores únicos (taxonomia, não texto livre)
+- **§3.2.13 WFPayment**: 12 campos adicionais movidos do `raw_extra` para colunas tipadas (material_servico_num, status_os, nivel_gerencial, malogro, tipo_de_lpu, tipo_de_despesa, valor_total_final, valor_unitario_para, mes_medicao, regional_soe_nova, centro_de_custo, data_execucao); 4 cols vestigiais (DEGRAU, ID_CONTRATO_ITEM, STATUS_DEGRAU, ITEM_PARA — 0% populated) explicitamente em raw_extra
+- **§9 R5.f simplificada** — OBJETO_DO_CONTRATO vira `fuzzy ≥85` puro (sem embedding/LLM cascade) — R5 inteira agora é SQL/fuzzy, **zero LLM-judge**
+- **§9 prefácio**: filtro padrão `wf.status_os IN ('EXECUTADO','EM EXECUÇÃO') AND wf.nivel_gerencial IN ('Em Pagamento','Medido') AND wf.malogro <> 'ERROR'` em todas as regras (parametrizável via `RuleDefinition.threshold_params.universe_filter`)
+- **§9 R6.x**: usar `wf.valor_total_final` (não `valor_total` — é o pago, após DE-PARA)
+- **§9 todas regras**: LEFT JOIN `supplier_bridge`; resultado tem flag `is_monitored_supplier` (210 empreiteiras em WF vs 147 monitoradas — 63 ficam apenas em analytics R7)
+- **§10 extracao_folha_de_rosto**: confirma Maritaca sabia-4 default (spike R$0.37/PDF, 86% campos, 40× abaixo do budget G2); HITL obrigatório se `_confidence_overall < 0.95`
+- **§14.2**: remover entrada "Casos Selecionados → tests/fixtures/" (é pivot table do Excel, não ground truth); ground truth virá de anotação manual durante Fase 2
 
 #### v1.1 (2026-05-17)
 
@@ -503,23 +516,34 @@ Esta é a **fonte de verdade dos pagamentos** (substitui o papel que `purchase_o
 |---|---|---|---|---|
 | `id` | `int` | `BIGSERIAL PK` | NOT NULL | |
 | `os_num` | `str` | `TEXT` | NOT NULL, INDEX | "OS" — chave de negócio |
-| `sistema` | `str` | `TEXT` | NULL | "SISTEMA" — WF1 ou WF2 |
+| `sistema` | `str` | `TEXT` | NULL | "SISTEMA" — WF1 ou WF2 (taxonomia 2 valores) |
 | `pedido_num` | `str` | `TEXT` | NULL, INDEX | "PEDIDO_NUM" (R6.1 × EKPO.Documento de compras) |
-| `contrato_num` | `str` | `TEXT` | NULL, INDEX | "CONTRATO_NUM" (R6.3 × EKPO.Contrato básico; R6.6 × GC.Documento) |
+| `contrato_num` | `str` | `TEXT` | NULL, INDEX | "CONTRATO_NUM" (R6.3 × EKPO.Contrato básico; R6.6 × GC.Documento) — 100% populated |
 | `item_num` | `str` | `TEXT` | NULL | "ITEM_NUM" (R6.4 × EKPO.Item; R6.7 × GC.Item) |
 | `item_descricao` | `str` | `TEXT` | NULL | "ITEM_DESCRICAO" (R6.8 × GC.Texto breve) |
-| `data_pedido` | `date` | `DATE` | NULL, INDEX | "DATA_PEDIDO" (R6.2 × EKPO.Últ.modif.no dia) |
-| `valor_total_final` | `decimal` | `NUMERIC(18,2)` | NULL | "VALOR_TOTAL_FINAL" (R6.5 × EKPO.Valor líquido pedido) |
+| `material_servico_num` | `str` | `TEXT` | NULL, INDEX | "MATERIAL_SERVICO_NUM" — 912 únicos — **chave pra `lpu_item.numero_servico` (R LPU)** [v1.1.1] |
+| `data_pedido` | `date` | `DATE` | NULL, INDEX | "DATA_PEDIDO" (R6.2 × EKPO.Últ.modif.no dia) — **partition key** |
+| `data_execucao` | `date` | `DATE` | NULL | "DATA_EXECUCAO" — usado por R7 (lag execução×pagamento) [v1.1.1] |
+| `valor_total_final` | `decimal` | `NUMERIC(18,2)` | NULL | "VALOR_TOTAL_FINAL" (R6.5 × EKPO.Valor líquido pedido) — **pago, após DE-PARA** [v1.1.1: usar este, não valor_total] |
 | `valor_unitario` | `decimal` | `NUMERIC(18,4)` | NULL | "VALOR_UNITARIO" (R6.9 × GC.Preço bruto LPU, tolerância) |
-| `categoria` | `str` | `TEXT` | NULL | "CATEGORIA" (R5.e) |
-| `uf` | `str` | `TEXT` | NULL | "UF" (R5.a — match exato) |
-| `cidade` | `str` | `TEXT` | NULL | "CIDADE" (R5.b — match normalizado) |
-| `tecnologia` | `str` | `TEXT` | NULL | "TECNOLOGIA" (R5.c) |
-| `atividade` | `str` | `TEXT` | NULL | "ATIVIDADE" (R5.d) |
-| `empreiteira` | `str` | `TEXT` | NULL, INDEX | "EMPREITEIRA" |
-| `fase_atual` | `str` | `TEXT` | NULL | "FASE_ATUAL" |
-| `status_os` | `str` | `TEXT` | NULL | "STATUS_OS" |
-| `raw_extra` | `dict` | `JSONB` | NOT NULL, DEFAULT '{}' | demais ~66 colunas |
+| `valor_unitario_para` | `decimal` | `NUMERIC(18,4)` | NULL | "VALOR_UNITARIO_PARA" — preço PARA do DE-PARA (override do unitário original) [v1.1.1] |
+| `categoria` | `str` | `TEXT` | NULL | "CATEGORIA" (R5.e — taxonomia 11 valores) |
+| `uf` | `str` | `TEXT` | NULL | "UF" (R5.a — match exato — 27 valores) |
+| `cidade` | `str` | `TEXT` | NULL | "CIDADE" (R5.b — match normalizado, ≥1000 valores) |
+| `tecnologia` | `str` | `TEXT` | NULL | "TECNOLOGIA" (R5.c — taxonomia 35 valores) |
+| `atividade` | `str` | `TEXT` | NULL | "ATIVIDADE" (R5.d — taxonomia 56 valores) |
+| `objeto_do_contrato` | `str` | `TEXT` | NULL | "OBJETO_DO_CONTRATO" (R5.f — **taxonomia 598 valores**, NÃO texto livre) [v1.1.1] |
+| `tipo_de_lpu` | `str` | `TEXT` | NULL | "TIPO_DE_LPU" — FIXO MENSAL / LPU MEDIÇÃO / LPU REFERENCIAL — discriminador R LPU e R7 [v1.1.1] |
+| `tipo_de_despesa` | `str` | `TEXT` | NULL | "TIPO_DE_DESPESA" — CAPEX / OPEX [v1.1.1] |
+| `empreiteira` | `str` | `TEXT` | NULL, INDEX | "EMPREITEIRA" — 210 únicos (vs 147 supplier_bridge — 63 não monitoradas) |
+| `fase_atual` | `str` | `TEXT` | NULL | "FASE_ATUAL" — 34 valores |
+| `status_os` | `str` | `TEXT` | NULL | "STATUS_OS" — 5 valores (EXECUTADO, EM EXECUÇÃO, CANCELADO, DEVOLVIDO, ERRO - AVALIAR OS) |
+| `nivel_gerencial` | `str` | `TEXT` | NULL | "NIVEL_GERENCIAL" — 5 valores; filtro padrão exige "Em Pagamento" ou "Medido" [v1.1.1] |
+| `malogro` | `str` | `TEXT` | NULL | "MALOGRO" — BACKLOG/ERROR/NAO; filtro padrão exclui 'ERROR' [v1.1.1] |
+| `mes_medicao` | `str` | `TEXT` | NULL | "MES_MEDICAO" — categórica formato "YYYY/MM" [v1.1.1] |
+| `regional_soe_nova` | `str` | `TEXT` | NULL | "REGIONAL_SOE_NOVA" — 6 valores (CONO, MG, NE, RJ/ES, SP, SUL) [v1.1.1] |
+| `centro_de_custo` | `str` | `TEXT` | NULL | "CENTRO_DE_CUSTO" — 360 únicos [v1.1.1] |
+| `raw_extra` | `dict` | `JSONB` | NOT NULL, DEFAULT '{}' | demais ~50 cols (cols vestigiais com 0% pop: DEGRAU, ID_CONTRATO_ITEM, STATUS_DEGRAU, ITEM_PARA; + cols opcionais como CLIENTE, PEP, SIGLA_DA_ESTACAO etc.) |
 | `ingestion_run_id` | `UUID` | `UUID` | NULL, FK → `payments.ingestion_run(id)` | rastreabilidade |
 | `created_at` | `datetime` | `TIMESTAMPTZ` | DEFAULT NOW() | |
 
@@ -1394,27 +1418,41 @@ CREATE TABLE IF NOT EXISTS payments.wf_payment (
     id                       BIGSERIAL,
     -- chaves de negócio
     os_num                   TEXT NOT NULL,
-    sistema                  TEXT,
+    sistema                  TEXT,                       -- WF1 ou WF2 (taxonomia 2)
     pedido_num               TEXT,
     contrato_num             TEXT,
     item_num                 TEXT,
     item_descricao           TEXT,
+    material_servico_num     TEXT,                       -- [v1.1.1] 912 únicos — chave LPU
     data_pedido              DATE NOT NULL,
+    data_execucao            DATE,                       -- [v1.1.1] usado por R7 lag
     -- valores
-    valor_total_final        NUMERIC(18,2),
+    valor_total_final        NUMERIC(18,2),              -- [v1.1.1] use ESTE (não valor_total) — pago após DE-PARA
     valor_unitario           NUMERIC(18,4),
-    -- escopo estruturado (R5)
-    categoria                TEXT,
-    uf                       TEXT,
-    cidade                   TEXT,
-    tecnologia               TEXT,
-    atividade                TEXT,
-    -- contexto
-    empreiteira              TEXT,
-    fase_atual               TEXT,
-    status_os                TEXT,
-    raw_extra                JSONB NOT NULL DEFAULT '{}'::jsonb,
-    ingestion_run_id         UUID,  -- FK adicionada após ingestion_run criada
+    valor_unitario_para      NUMERIC(18,4),              -- [v1.1.1] override DE-PARA
+    -- escopo estruturado (R5) — todas taxonomias controladas
+    categoria                TEXT,                       -- 11 valores
+    uf                       TEXT,                       -- 27 valores (estados BR)
+    cidade                   TEXT,                       -- ≥1k mas finito
+    tecnologia               TEXT,                       -- 35 valores
+    atividade                TEXT,                       -- 56 valores
+    objeto_do_contrato       TEXT,                       -- [v1.1.1] 598 valores — taxonomia, não texto livre
+    -- tipos contratuais (R7 / R LPU)
+    tipo_de_lpu              TEXT,                       -- [v1.1.1] FIXO MENSAL / LPU MEDIÇÃO / LPU REFERENCIAL
+    tipo_de_despesa          TEXT,                       -- [v1.1.1] CAPEX / OPEX
+    -- contexto operacional (filtro universal)
+    empreiteira              TEXT,                       -- 210 únicos (vs 147 monitoradas)
+    fase_atual               TEXT,                       -- 34 valores
+    status_os                TEXT,                       -- 5 valores; filtro: ('EXECUTADO','EM EXECUÇÃO')
+    nivel_gerencial          TEXT,                       -- [v1.1.1] 5 valores; filtro: ('Em Pagamento','Medido')
+    malogro                  TEXT,                       -- [v1.1.1] filtro: != 'ERROR'
+    -- contexto financeiro/temporal
+    mes_medicao              TEXT,                       -- [v1.1.1] YYYY/MM
+    regional_soe_nova        TEXT,                       -- [v1.1.1] 6 valores
+    centro_de_custo          TEXT,                       -- [v1.1.1] 360 únicos
+    -- catchall
+    raw_extra                JSONB NOT NULL DEFAULT '{}'::jsonb,  -- ~50 cols restantes (vestigiais + opcionais)
+    ingestion_run_id         UUID,                       -- FK adicionada após ingestion_run criada
     created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (id, data_pedido)
 ) PARTITION BY RANGE (data_pedido);
@@ -1439,7 +1477,13 @@ CREATE TABLE payments.wf_payment_default PARTITION OF payments.wf_payment DEFAUL
 CREATE INDEX idx_wf_os               ON payments.wf_payment(os_num);
 CREATE INDEX idx_wf_pedido           ON payments.wf_payment(pedido_num);
 CREATE INDEX idx_wf_contrato         ON payments.wf_payment(contrato_num);
+CREATE INDEX idx_wf_servico          ON payments.wf_payment(material_servico_num);  -- [v1.1.1] join LPU
 CREATE INDEX idx_wf_empreiteira_data ON payments.wf_payment(empreiteira, data_pedido);
+-- Filtro universal (R1–R6.9): índice parcial otimizado [v1.1.1]
+CREATE INDEX idx_wf_universe ON payments.wf_payment(empreiteira, data_pedido)
+    WHERE status_os IN ('EXECUTADO', 'EM EXECUÇÃO')
+      AND nivel_gerencial IN ('Em Pagamento', 'Medido')
+      AND malogro <> 'ERROR';
 
 -- ============================================================
 -- PurchaseOrderGc [v1.1: 44.782 linhas — sheet "Contratos Guarda Chuvas"]
@@ -1621,11 +1665,12 @@ VALUES
      'medium', 'fuzzy',
      'app.core.services.payments.rules.regra_5e_categoria',
      '{"fuzzy_threshold": 0.90}'::jsonb),
-    (gen_random_uuid(), 'REGRA_5_OBJETO', 'Objeto — cascata híbrida (única que usa LLM)',
-     'OBJETO_DO_CONTRATO (PDF) vs wf_payment.item_descricao: fuzzy→embedding→LLM-judge',
-     'medium', 'embedding',
+    -- v1.1.1: simplificada para fuzzy puro (OBJETO_DO_CONTRATO é taxonomia 598 valores, não texto livre)
+    (gen_random_uuid(), 'REGRA_5_OBJETO', 'Objeto — fuzzy contra taxonomia',
+     'wf.objeto_do_contrato (taxonomia 598 valores) ≈ contract_version.objeto_contrato (fuzzy ≥85)',
+     'medium', 'fuzzy',
      'app.core.services.payments.rules.regra_5f_objeto',
-     '{"fuzzy_threshold": 0.85, "embedding_threshold": 0.75, "llm_judge_threshold": 0.6}'::jsonb),
+     '{"fuzzy_threshold": 0.85}'::jsonb),
     -- REGRA 6 v1.1: família de 9 sub-regras (WF×EKPO 6.1-6.5; WF×GC 6.6-6.9)
     (gen_random_uuid(), 'REGRA_6_1', 'WF PEDIDO_NUM × EKPO Documento de compras',
      'wf_payment.pedido_num deve existir em purchase_order_header.documento_compras',
@@ -1876,6 +1921,19 @@ beholder/
 ## 9. Rules Catalog
 
 **v1.1** — alinhado com DOCX original (Janeiro 2026, Controladoria Operacional). 16 regras determinísticas/híbridas (rules_engine) + 11 detectores estatísticos (analytics_engine — REGRA 7, §9.7).
+**v1.1.1** — REGRA 5.f simplificada (taxonomia 598 valores, não texto livre) → **zero chamadas LLM-judge**; filtro padrão universal abaixo.
+
+### Filtro padrão (universe_filter) [v1.1.1]
+
+Todas as regras R1–R6.9 e R LPU aplicam, por padrão, o filtro abaixo sobre `wf_payment` para reduzir ruído (canceladas, em erro). Cada `RuleDefinition.threshold_params.universe_filter` pode override.
+
+```sql
+WHERE wf.status_os IN ('EXECUTADO', 'EM EXECUÇÃO')
+  AND wf.nivel_gerencial IN ('Em Pagamento', 'Medido')
+  AND wf.malogro <> 'ERROR'
+```
+
+Estimativa: filtra ~20-30% das 869k linhas → universo candidato ~600-700k. Findings só são criados para `is_monitored_supplier = TRUE` (LEFT JOIN com supplier_bridge); pagamentos de empreiteiras fora do escopo monitorado vão apenas para analytics R7.
 
 Para cada regra: input, lógica, threshold, output (FindingDraft).
 
@@ -1944,30 +2002,28 @@ DOCX original: "Bater Base 'Contratos – Empreteiras' campos 'Texto Breve' e 'P
 - **Lógica**: alerta se `current_version` tem >2 campos NULL entre `objeto_contrato`, `tecnologia`, `atividade`, `uf`, `cidade`, `val_fix_cab`.
 - **Output**: lista de campos faltantes
 
-### REGRA 5 — Escopo (família 5.a–5.f) [v1.1: 5 SQL + 1 cascata]
+### REGRA 5 — Escopo (família 5.a–5.f) [v1.1.1: 100% determinístico/fuzzy, zero LLM]
 
-DOCX original lista 6 campos para comparar com PDF do ARIBA. O Analítico WF tem **5 desses 6 estruturados** (UF, CIDADE, TECNOLOGIA, ATIVIDADE, CATEGORIA), então só 1 (OBJETO_DO_CONTRATO) precisa NLP. Decisão **D3 aprovada**: cascata só em 5.f; outros 5 são SQL puro.
+DOCX original lista 6 campos para comparar com PDF do ARIBA.
+
+**Achado Pré-B (v1.1.1):** `wf_payment.OBJETO_DO_CONTRATO` tem apenas **598 valores únicos** em 869k linhas (99% pop) — é **taxonomia controlada**, NÃO texto livre. Logo a cascata fuzzy→embedding→LLM-judge proposta na v1.1 estava over-engineered. Toda a R5 fica determinística/fuzzy.
 
 **Input comum**: `payments.wf_payment` × `payments.contract_version` (vigente em `wf_payment.data_pedido`).
 
-| Sub | Campo | Engine | Threshold | Lógica resumida |
-|---|---|---|---|---|
-| 5.a | `uf` | `sql_deterministic` | none | `wf.uf = cv.uf` (após uppercase) |
-| 5.b | `cidade` | `sql_deterministic` | none | `normalize(wf.cidade)` ∈ `array(normalize(cv.cidade[]))` (lower, sem acento/hífen) |
-| 5.c | `tecnologia` | `fuzzy` (RapidFuzz) | `fuzzy_threshold=0.90` | `partial_ratio(wf.tecnologia, cv.tecnologia) < 90` → finding |
-| 5.d | `atividade` | `fuzzy` | `0.90` | idem |
-| 5.e | `categoria` | `fuzzy` (vs `supplier_bridge.categoria`) | `0.90` | idem |
-| 5.f | `objeto_contrato` × `wf.item_descricao` | cascata `fuzzy → embedding → llm_judge` | múltiplos | cascata híbrida; método com maior score decide |
+| Sub | Campo WF (cardinalidade) | × | Campo Contract | Engine | Threshold | Lógica resumida |
+|---|---|---|---|---|---|---|
+| 5.a | `uf` (27) | × | `contract_version.uf[]` | `sql_deterministic` | none | `wf.uf = ANY(cv.uf)` (após uppercase) |
+| 5.b | `cidade` (≥1k) | × | `contract_version.cidade[]` | `sql_deterministic` | none | `normalize(wf.cidade)` ∈ array(normalize(cv.cidade[])) (lower, sem acento/hífen) |
+| 5.c | `tecnologia` (35) | × | `contract_version.tecnologia` | `fuzzy` (RapidFuzz) | `fuzzy_threshold=0.90` | `partial_ratio < 90` → finding |
+| 5.d | `atividade` (56) | × | `contract_version.atividade` | `fuzzy` | `0.90` | idem |
+| 5.e | `categoria` (11) | × | `supplier_bridge.categoria` | `fuzzy` | `0.90` | idem |
+| 5.f | `objeto_do_contrato` (598) | × | `contract_version.objeto_contrato` | `fuzzy` | `fuzzy_threshold=0.85` | `partial_ratio < 85` → finding |
 
-**Detalhe da cascata 5.f:**
+**Observação importante (v1.1.1)**: como `OBJETO_DO_CONTRATO` é taxonomia, R5.f não precisa de embedding/LLM. Se um pagamento WF tiver objeto fora da lista de 598 conhecidos, é sinal de novo padrão (não erro de match) — emite finding `informational`, severity `low`, sem alarme.
 
-1. **Etapa 1 — fuzzy (RapidFuzz)**: `partial_ratio(item_descricao_normalizado, objeto_normalizado)` — se ≥85, match. Se 50-85, etapa 2.
-2. **Etapa 2 — embedding (pgvector)**: cosine similarity entre embedding(item_descricao) e embedding(objeto_contrato). Se ≥0.75, match. Se 0.5-0.75, etapa 3.
-3. **Etapa 3 — LLM-judge (Maritaca sabia-4 default, ClaroHub fallback)**: prompt "este item de pagamento ('ITEM_DESCRICAO') está dentro do escopo do objeto contratado ('OBJETO')? Responda SIM/NÃO + justificativa 1 linha." Score 0..1.
+**Output (5.x)**: `expected_value={"campo": ..., "esperado_contrato": ...}, actual_value={"observado_wf": ..., "fuzzy_score": 0.78}`
 
-**Cost ledger**: cada LLM-judge call registra em `finops_ledger` com `domain='payments', agent='regra_5f_judge'`.
-
-**Output (5.f)**: `expected_value={"objeto": ..., "scope_method": "fuzzy"|"embedding"|"llm_judge", "score": 0.42}, actual_value={"item_descricao": ...}`
+**Custo LLM da R5**: **R$0** (era estimado em R$10-50k/mês via cascata na v1.1).
 
 ### REGRA 6 — Batimento WF × EKPO × GC (família 6.1–6.9) [v1.1: expandida]
 
@@ -2123,19 +2179,13 @@ Inputs: `markdown_pdf`.
 
 Saída esperada: JSON list de `{secao, clausula_numero, texto, pagina}` para gerar embeddings depois.
 
-#### `reconciliacao_escopo_semantico.md`
+#### `reconciliacao_escopo_semantico.md` — DEPRECATED [v1.1.1]
 
-**v1.1**: usado **apenas pela REGRA 5.f** (OBJETO_DO_CONTRATO). Os outros 5 campos da R5 (UF, Cidade, Tecnologia, Atividade, Categoria) são determinísticos/fuzzy puro — não chamam essa skill.
+**Achado Pré-B (v1.1.1):** essa skill **não é mais necessária**. `wf_payment.OBJETO_DO_CONTRATO` é taxonomia com 598 valores únicos (não texto livre), então R5.f vira `fuzzy ≥85` puro (RapidFuzz). Zero chamadas LLM-judge para reconciliação.
 
-Identidade: "Juiz semântico para validar se uma OS está dentro do objeto contratado."
+**Implicação:** este SKILL.md **não é criado na Fase 5**. R5 inteira (5.a–5.f) é executada por código Python puro (`app/core/services/payments/rules/regra_5*.py`).
 
-Inputs: `item_descricao` (de `wf_payment`), `objeto_contrato` (de `contract_version`).
-
-Saída esperada: `{match: bool, score: float, rationale: string}`.
-
-Política [v1.1]: **Maritaca sabia-4** default (PT-BR é nativo, qualidade primeiro); ClaroHub fallback.
-
-Guardrails: rationale max 200 chars; score em [0,1].
+A skill fica especificada aqui apenas para o caso de a Controladoria expandir o escopo da R5 no futuro (ex.: comparar com texto livre de cláusula contratual, não com `wf.objeto_do_contrato`).
 
 #### `reconciliacao_lpu_matematica.md`
 
@@ -2305,7 +2355,7 @@ Fonte autoritativa: `docs/DATA_INVENTORY.md` (gerado por `scripts/inventory_data
 | **`MSRV5 - EXTRAÇÃO LPU.txt`** [v1.1] | (texto SAP pipe-delimited) | **3.103.381 linhas** (2.909.412 registros + paginação) | **`lpu_item` (fonte autoritativa, source='msrv5')** | parser dedicado `scripts/parse_msrv5.py` |
 | **`Analitico_Empreiteiras_WF1_WF2_TOTAL_2025 2.txt.xlsx`** [v1.1] | `Analitico_Empreiteiras_WF1_WF2_` | **869.663 × 81** | **`wf_payment`** (nova) | streaming via openpyxl read_only |
 | `Analitico_...xlsx` | `CC + CONTA` | 1.049 × 2 | **`cost_center_account`** (nova) | |
-| `Analitico_...xlsx` | `Casos Selecionados` | 339 × 12 | `tests/payments/fixtures/casos_selecionados.csv` (ground truth Controladoria) | **D4 aprovada**: vai pra fixtures, não DB |
+| `Analitico_...xlsx` | `Casos Selecionados` | 339 × 12 | **(não ingerir)** | [v1.1.1] É pivot table do Excel (4 cross-tabs lado a lado), **não ground truth**. Ground truth virá de anotação manual na Fase 2. |
 | `CONTRATOS/<empreiteira>/CW*.zip` | PDFs assinados | 58 ZIPs / 60 PDFs (166 MB) | `contract_version` (via Fase 4 extração PDF) | |
 | `Regras - POC … .docx` | — | — | (referência humana, não ingerido) | base do Rules Catalog v1.1 |
 
