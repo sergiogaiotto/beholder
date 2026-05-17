@@ -122,7 +122,7 @@ Opcional:
 | `PUBLIC_HTTPS_PORT`  | `8010`  | use `443` se quiser URL sem porta           |
 | `PUBLIC_HTTP_PORT`   | `80`    | mantenha em 80 (ACME challenge precisa)     |
 
-Opcional: chaves de LLM (OpenAI / Maritaca / GAIA), LangFuse, MLflow, OPA.
+Opcional: chaves de LLM (ClaroHub / Maritaca), LangFuse, MLflow, OPA.
 Sem chaves, o Beholder roda em **modo mock** — todas as telas ficam
 navegáveis para validação.
 

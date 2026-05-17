@@ -8,7 +8,7 @@
 **Framework:** FastAPI
 **Conectividade:** OpenAPI / Swagger
 **Bibliotecas:** Deep-Agent Harness, LangGraph
-**Modelos LLM API_KEY:** Azure OpenAI gpt-4o, Maritaca.ai Sabia-4, Gemma.GAIA 4Bi
+**Modelos LLM API_KEY:** ClaroHub on-prem (openai/gpt-oss-20b, OpenAI-compatible), Maritaca.ai Sabia-4
 **Banco de Dados:** SQLite
 **Imterface Visual e Navegação:** (https://github.com/sergiogaiotto/agente-inteligencia; https://agente-inteligencia.onrender.com/), com menu a esquerda que pode ser aberto e minizado, parte central com operação de cada módulo e a direita deve oferecer detalhes por contexto de cada item de cada módulo
 **UI:** template engine
@@ -37,7 +37,7 @@ Plataforma de agentes hierárquica, poliárquica em execução e monárquica em 
 
 ### **2.1. Arquitetura Hexagonal**
 
-O *Core Domain* da aplicação é isolado de tecnologias externas. Adaptadores de entrada (FastAPI) e adaptadores de saída (SQLite, OpenAI, Maritaca Sabiá-4 e Gaia 4Bi) conectam-se ao núcleo através de portas bem definidas.
+O *Core Domain* da aplicação é isolado de tecnologias externas. Adaptadores de entrada (FastAPI) e adaptadores de saída (PostgreSQL, ClaroHub on-prem e Maritaca Sabiá-4 cloud) conectam-se ao núcleo através de portas bem definidas.
 
 ### **2.2. AI Mesh & Infraestrutura**
 

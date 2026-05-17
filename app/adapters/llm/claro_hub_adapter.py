@@ -25,9 +25,9 @@ class ClaroHubClient(LLMClient):
 
     def __init__(self):
         s = get_settings()
-        self.api_key = s.azure_openai_api_key
-        self.base_url = s.azure_openai_endpoint.rstrip("/") + "/v1"
-        self.model = s.azure_openai_deployment
+        self.api_key = s.claro_hub_api_key
+        self.base_url = s.claro_hub_endpoint.rstrip("/") + "/v1"
+        self.model = s.claro_hub_model
         self.proxy = s.https_proxy or s.http_proxy or None
 
     async def complete(

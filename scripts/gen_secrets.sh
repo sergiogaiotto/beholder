@@ -52,12 +52,13 @@ cat <<EOF
 # PUBLIC_HTTPS_PORT=8010
 EOF
 
-printf "\n${CYAN}# ===== Azure OpenAI (preencha quando tiver Azure provisioned) =====${RESET}\n"
+printf "\n${CYAN}# ===== ClaroHub (Hub GPU interno, OpenAI-compatible) =====${RESET}\n"
 cat <<EOF
-# AZURE_OPENAI_API_KEY=
-# AZURE_OPENAI_ENDPOINT=https://SEU-RECURSO.openai.azure.com
-# AZURE_OPENAI_API_VERSION=2024-08-01-preview
-# AZURE_OPENAI_DEPLOYMENT=gpt-4o
+# CLARO_HUB_API_KEY=
+# CLARO_HUB_ENDPOINT=https://hub-gpus.claro.com.br/gpt20
+# CLARO_HUB_MODEL=openai/gpt-oss-20b
+# HTTP_PROXY=http://netproxy.netservicos.corp:8080
+# HTTPS_PROXY=http://netproxy.netservicos.corp:8080
 EOF
 
 cat <<EOF

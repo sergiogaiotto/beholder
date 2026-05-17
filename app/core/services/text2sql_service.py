@@ -78,41 +78,50 @@ class Text2SqlService:
     def _build_agent(self, allowed_tables: list[str], model_name: str | None = None):
         """Cria o Deep Agent com SQL toolkit restrito + skills + AGENTS.md.
 
-        Lê credenciais Azure OpenAI do .env (via settings). Se a API key ou o
+        Lê credenciais ClaroHub do .env (via settings). Se a API key ou o
         endpoint estiverem ausentes, lança ValueError com mensagem clara em
         vez do erro críptico do SDK.
         """
         from deepagents import create_deep_agent
         from deepagents.backends import FilesystemBackend
-        from langchain_openai import AzureChatOpenAI
+        from langchain_openai import ChatOpenAI
         from langchain_community.agent_toolkits import SQLDatabaseToolkit
 
         from app.config import get_settings
         settings = get_settings()
 
-        api_key = settings.azure_openai_api_key
-        endpoint = settings.azure_openai_endpoint
+        api_key = settings.claro_hub_api_key
+        endpoint = settings.claro_hub_endpoint
         if not (api_key and endpoint):
             raise ValueError(
-                "Azure OpenAI não configurado para Text-to-SQL. "
-                "Defina no .env (ou no painel do Hostinger): "
-                "AZURE_OPENAI_API_KEY=..., "
-                "AZURE_OPENAI_ENDPOINT=https://SEU-RECURSO.openai.azure.com, "
-                "AZURE_OPENAI_DEPLOYMENT=gpt-4o."
+                "ClaroHub não configurado para Text-to-SQL. "
+                "Defina no .env (ou no painel de deploy): "
+                "CLARO_HUB_API_KEY=..., "
+                "CLARO_HUB_ENDPOINT=https://hub-gpus.claro.com.br/gpt20, "
+                "CLARO_HUB_MODEL=openai/gpt-oss-20b."
             )
 
-        deployment = model_name or settings.azure_openai_deployment
+        deployment = model_name or settings.claro_hub_model
 
         db = self._build_db(allowed_tables)
 
+        # ClaroHub é OpenAI-compatible (endpoint expõe /v1/chat/completions).
+        # `ChatOpenAI` com `base_url` cobre o caso. Proxy corporativo via
+        # http_client httpx se configurado em settings.https_proxy/http_proxy.
+        proxy = settings.https_proxy or settings.http_proxy or None
+        http_client = None
+        if proxy:
+            import httpx
+            http_client = httpx.Client(proxy=proxy, verify=False)
+
         # Force temperature=0 para SQL determinístico.
-        model = AzureChatOpenAI(
-            azure_deployment=deployment,
-            api_version=settings.azure_openai_api_version,
-            azure_endpoint=endpoint,
+        model = ChatOpenAI(
+            model=deployment,
+            base_url=endpoint.rstrip("/") + "/v1",
             api_key=api_key,
             temperature=0,
             max_tokens=4096,
+            http_client=http_client,
         )
 
         toolkit = SQLDatabaseToolkit(db=db, llm=model)
@@ -191,7 +200,7 @@ class Text2SqlService:
         e usuário logado). Se vazios, nenhuma restrição extra é injetada.
         """
         from app.config import get_settings
-        model_used_str = get_settings().azure_openai_deployment
+        model_used_str = get_settings().claro_hub_model
 
         if not question or not question.strip():
             raise ValueError("pergunta vazia")
@@ -328,8 +337,8 @@ class Text2SqlService:
                 if isinstance(meta, dict):
                     tokens_in += meta.get("input_tokens", 0) or meta.get("prompt_tokens", 0) or 0
                     tokens_out += meta.get("output_tokens", 0) or meta.get("completion_tokens", 0) or 0
-            # estimativa gpt-4o no Azure: $2.5/M input, $10/M output (out 2025)
-            cost = (tokens_in / 1_000_000) * 2.5 + (tokens_out / 1_000_000) * 10.0
+            # ClaroHub é on-prem (sem custo direto por chamada).
+            cost = 0.0
         except Exception:
             pass
 

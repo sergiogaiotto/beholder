@@ -41,8 +41,8 @@ _BUDGET_HEADERS = [
 ]
 
 _BUDGET_EXAMPLES = [
-    ["Radar mensal", "module", "radar", "monthly", 500.00, 0.8, "false", "limite operacional radar"],
-    ["GPT-4o global", "model", "gpt-4o", "monthly", 1000.00, 0.9, "true", "hard stop ativo"],
+    ["Empreiteiras-WF mensal", "module", "empreiteiras_wf", "monthly", 500.00, 0.8, "false", "limite operacional do vertical"],
+    ["Maritaca Sabiá-4 global", "model", "sabia-4", "monthly", 1000.00, 0.9, "true", "hard stop ativo"],
 ]
 
 _POLICY_HEADERS = [
@@ -51,8 +51,8 @@ _POLICY_HEADERS = [
 ]
 
 _POLICY_EXAMPLES = [
-    ["gpt-4o", "medium", "high", 0.50, 4096, "radar,churn", "modelo premium para análises", "true"],
-    ["sabia-4", "low", "medium", 0.05, 2048, "", "modelo padrão pt-BR", "true"],
+    ["sabia-4", "low", "medium", 0.05, 2048, "", "modelo padrão pt-BR (Maritaca cloud)", "true"],
+    ["openai/gpt-oss-20b", "low", "high", 0.0, 4096, "empreiteiras_wf", "modelo on-prem (ClaroHub) — sem custo direto", "true"],
 ]
 
 

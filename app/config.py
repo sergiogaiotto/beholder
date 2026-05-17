@@ -51,24 +51,24 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 480
 
-    # LLMs — Azure OpenAI (gpt-4o)
-    azure_openai_api_key: str = ""
-    azure_openai_endpoint: str = ""           # ex: https://meu-recurso.openai.azure.com
-    azure_openai_api_version: str = "2024-08-01-preview"
-    azure_openai_deployment: str = "gpt-4o"   # nome do deployment no Azure (usado como model)
+    # LLMs — ClaroHub (Hub GPU interno, OpenAI-compatible) e Maritaca (Sabia-4)
+    # ClaroHub: endpoint https://hub-gpus.claro.com.br/gpt20, modelo
+    # openai/gpt-oss-20b (reasoning). Proxy corporativo obrigatório.
+    claro_hub_api_key: str = ""
+    claro_hub_endpoint: str = "https://hub-gpus.claro.com.br/gpt20"
+    claro_hub_model: str = "openai/gpt-oss-20b"
 
     maritaca_api_key: str = ""
     maritaca_model: str = "sabia-4"
     maritaca_base_url: str = "https://chat.maritaca.ai/api"
 
-    gaia_api_key: str = ""
-    gaia_model: str = "gaia-4b"
-    gaia_base_url: str = ""
-
-    # Router
+    # Router — política padrão de seleção de modelo.
+    # Beholder roda em ambiente Claro: Maritaca como default (cloud, baixo
+    # custo, ótimo PT-BR), ClaroHub como fallback/cheap (on-prem, sem
+    # custo direto por chamada, ideal para volumes altos de extração PDF).
     router_default_model: str = "sabia-4"
-    router_fallback_model: str = "gpt-4o"
-    router_cheap_model: str = "gaia-4b"
+    router_fallback_model: str = "openai/gpt-oss-20b"
+    router_cheap_model: str = "openai/gpt-oss-20b"
 
     # Observability
     langfuse_public_key: str = ""

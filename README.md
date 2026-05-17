@@ -9,7 +9,7 @@ Solução de validação contínua de pagamentos em escala (80k+ pagamentos/mês
 - Verticais futuros: Fornecedores-NDI, Pagamentos-Recorrentes, Contratos-Diretos.
 
 **O que herda da Vértice (plataforma):**
-Auth + RBAC, Audit trail, FinOps ledger, Guardrails, OPA policy, multi-LLM adapters (Azure OpenAI / Maritaca Sabiá / GAIA / Hub Claro), Prompts versionados, Modules registry, Skills (SKILL.md), Text2SQL para discovery, observabilidade (OpenTelemetry + LangFuse + MLflow).
+Auth + RBAC, Audit trail, FinOps ledger, Guardrails, OPA policy, multi-LLM adapters (ClaroHub on-prem + Maritaca Sabiá-4 cloud), Prompts versionados, Modules registry, Skills (SKILL.md), Text2SQL para discovery, observabilidade (LangFuse + MLflow + OpenTelemetry).
 
 **O que adiciona:**
 Worker assíncrono (dramatiq) para extração PDF e ingestão XLSX, schema PG isolado (`payments`), Schema Projector declarativo (SAP raw → semântico), rules engine de reconciliação, pgvector para cláusulas de contrato, materialized views para dashboards de KPI.
@@ -44,7 +44,7 @@ Tudo que cruza a fronteira do core passa por uma porta. Adaptadores são plugáv
 |---|---|
 | Web | FastAPI, Jinja2, HTMX, Alpine.js, Tailwind (CDN) |
 | Persistência | PostgreSQL 14+ (asyncpg + pool) |
-| LLMs | Azure OpenAI gpt-4o, Maritaca Sabiá-4, Gemma GAIA 4Bi |
+| LLMs | ClaroHub on-prem (openai/gpt-oss-20b, OpenAI-compatible), Maritaca Sabiá-4 cloud |
 | Orquestração de agentes | LangGraph, Deep-Agent Harness |
 | Observabilidade | OpenTelemetry, LangFuse, MLflow |
 | Política | OPA (Open Policy Agent) |
@@ -118,7 +118,7 @@ app/
 │   └── services/           use cases (regras de negócio)
 ├── adapters/
 │   ├── db/                 PostgreSQL/asyncpg + repositórios
-│   ├── llm/                OpenAI, Maritaca, GAIA + roteador
+│   ├── llm/                ClaroHub, Maritaca, Mock + roteador
 │   ├── guardrails/         input sanitizer + output validator
 │   ├── observability/      LangFuse, MLflow, OTel
 │   └── policy/             OPA

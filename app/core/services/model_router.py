@@ -10,9 +10,9 @@ class ModelRouter:
     """Roteia chamadas para o LLM mais adequado dado o tipo de tarefa.
 
     Política padrão (parametrizável via settings ou OPA no futuro):
-      - UMA_PALAVRA / SCORE / TERMOS  -> modelo barato (GAIA 4Bi)
-      - SUMARIO / RESUMO / pt-BR      -> Sabiá-4 (Maritaca)
-      - INTENCAO / multi-step / outros -> gpt-4o (Azure OpenAI)
+      - UMA_PALAVRA / SCORE / TERMOS  -> cheap (ClaroHub gpt-oss-20b on-prem)
+      - SUMARIO / RESUMO / pt-BR      -> default (Sabiá-4, Maritaca cloud)
+      - INTENCAO / multi-step / outros -> fallback (ClaroHub gpt-oss-20b)
 
     Em caso de falha do modelo escolhido, faz fallback ordenado.
     """
