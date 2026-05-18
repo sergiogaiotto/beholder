@@ -64,6 +64,22 @@ async def _reset_payments_per_test():
 
 
 @pytest.fixture
+async def ingestion_run_id() -> AsyncGenerator[UUID, None]:
+    """IngestionRun base — FK pra LPUItem/PO/WF/etc nos tests."""
+    from app.adapters.db.repositories.payments import PgIngestionRunRepository
+    from app.core.domain.payments import IngestionRun, IngestionStatus
+
+    run = IngestionRun(
+        source_type="xlsx",
+        source_filename="rules_test_fixture.xlsx",
+        target_table="payments.wf_payment",
+        status=IngestionStatus.PENDING,
+    )
+    await PgIngestionRunRepository().create(run)
+    yield run.id
+
+
+@pytest.fixture
 async def test_user_id() -> AsyncGenerator[UUID, None]:
     """User fresh por test — FK pra ContractMaster.created_by_id etc."""
     user_id = uuid.uuid4()
