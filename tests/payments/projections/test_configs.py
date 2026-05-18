@@ -22,10 +22,13 @@ EXPECTED_CONFIGS = {
     "gc": "PurchaseOrderGc",
     "wf_payment": "WFPayment",
     "cost_center": "CostCenterAccount",
+    # Bloco F adicionou msrv5 (LPUItem from MSRV5 TXT)
+    "msrv5": "LPUItem",
 }
 
 
-def test_all_7_configs_present():
+def test_all_configs_present():
+    """8 YAMLs: 7 XLSX (Bloco E) + 1 MSRV5 TXT (Bloco F)."""
     found = list_projections()
     assert set(found.keys()) == set(EXPECTED_CONFIGS.keys())
 
@@ -192,3 +195,28 @@ def test_wf_payment_required_data_pedido_raises_if_missing(configs):
     rows = [{"SISTEMA": "WF1", "OS": "OS-1"}]
     with pytest.raises(ValueError, match="data_pedido"):
         list(project(cfg, iter(rows)))
+
+
+def test_msrv5_smoke(configs):
+    """MSRV5 projeta com keys snake_case já tipadas (identity-like)."""
+    from datetime import date
+
+    cfg = configs["msrv5"]
+    rows = [{
+        "data_documento": date(2024, 6, 1),
+        "documento_compras": "5700012782",
+        "item": 7913,
+        "numero_servico": "9000507",
+        "qtd_solicitada": Decimal("0.000"),
+        "preco_unitario": Decimal("2.71"),
+        "texto_breve": "SERV CONFECCAO",
+    }]
+    result = list(project(cfg, iter(rows)))
+    lpu = result[0]
+    assert lpu.data_documento == date(2024, 6, 1)
+    assert lpu.documento_compras == "5700012782"
+    assert lpu.preco_unitario == Decimal("2.71")
+    # default 'source: msrv5' aplicado
+    from app.core.domain.payments import SourceType
+    assert lpu.source is SourceType.MSRV5
+    assert lpu.moeda == "BRL"  # default

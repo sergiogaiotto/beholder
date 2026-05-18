@@ -1,0 +1,48 @@
+# Projeção do `MSRV5 - EXTRAÇÃO LPU.txt` → payments.lpu_item.
+#
+# 3.103.381 linhas (2.909.414 data rows após skip de separadores/headers/footer).
+# Parser parse_msrv5 já retorna dicts com keys snake_case + tipos nativos
+# (date/Decimal/int) — projeção é majoritariamente identity, mas declarada
+# explicitamente para validar e setar defaults (source='msrv5').
+#
+# Particionada por ano (data_documento). batch_size grande pra throughput;
+# acceptance gate (Bloco G) valida que carga total fica <5 min.
+
+target_entity: LPUItem
+description: LPU do MSRV5 — 3.1M rows; particionada por ano (data_documento).
+
+source:
+  format: msrv5
+  encoding: cp1252
+
+columns:
+  data_documento:
+    source: data_documento
+    type: date
+    required: true
+  documento_compras:
+    source: documento_compras
+    required: true
+  item:
+    source: item
+    type: int
+  numero_servico:
+    source: numero_servico
+    required: true
+  qtd_solicitada:
+    source: qtd_solicitada
+    type: decimal
+  preco_unitario:
+    source: preco_unitario
+    type: decimal
+    required: true
+  texto_breve:
+    source: texto_breve
+
+defaults:
+  source: msrv5  # SourceType enum
+  moeda: BRL
+
+load:
+  method: bulk_insert
+  batch_size: 50000  # MSRV5 é o maior volume — batch maior amortiza overhead

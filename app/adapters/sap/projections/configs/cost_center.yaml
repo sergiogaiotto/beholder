@@ -17,3 +17,7 @@ columns:
   conta_razao:
     source: CONTA_RAZAO
     required: true
+
+load:
+  method: bulk_upsert  # idempotente por (centro_de_custo, conta_razao)
+  batch_size: 1000

@@ -33,3 +33,7 @@ columns:
   cnpj:
     source: CNPJ
     required: true
+
+load:
+  method: bulk_upsert  # idempotente por (contrato_num_sap, ref_ws)
+  batch_size: 500

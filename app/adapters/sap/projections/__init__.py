@@ -17,6 +17,7 @@ from app.adapters.sap.projections.schema import (
     CatchallConfig,
     FieldMapping,
     FieldType,
+    LoadConfig,
     ProjectionConfig,
     SourceConfig,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "FieldMapping",
     "FieldType",
     "CatchallConfig",
+    "LoadConfig",
     "PROJECTIONS_DIR",
     "load_projection",
     "list_projections",

@@ -68,6 +68,20 @@ class FieldMapping(BaseModel):
     """Aplica .strip() em valores string antes de coerção."""
 
 
+class LoadConfig(BaseModel):
+    """Como o loader (Bloco F) deve persistir os models projetados."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["bulk_insert", "bulk_upsert"] = "bulk_insert"
+    """Método do repo a invocar. bulk_upsert pra catálogos (SupplierBridge,
+    CostCenterAccount); bulk_insert (com ON CONFLICT DO NOTHING) pro resto."""
+
+    batch_size: int = Field(default=10_000, ge=1)
+    """Tamanho do batch passado pro repo. 10k é razoável pra asyncpg
+    executemany; tunar via Bloco G acceptance gate."""
+
+
 class CatchallConfig(BaseModel):
     """Configuração do campo catch-all (ex: raw_extra)."""
 
@@ -99,3 +113,6 @@ class ProjectionConfig(BaseModel):
     catchall: CatchallConfig | None = None
     defaults: dict[str, Any] = Field(default_factory=dict)
     """Valores fixos aplicados a todos os rows (ex: source='msrv5')."""
+
+    load: LoadConfig = Field(default_factory=LoadConfig)
+    """Método de persistência (loader F). Default: bulk_insert / batch 10k."""
