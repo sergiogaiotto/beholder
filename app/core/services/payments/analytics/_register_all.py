@@ -19,11 +19,11 @@ from app.core.services.payments.analytics import (  # noqa: F401
 )
 
 # Bloco C — 3 detectores temporais.
-# from app.core.services.payments.analytics import (  # noqa: F401
-#     r7_pico_fim_periodo,
-#     r7_periodos_atipicos,
-#     r7_validade_vencida,
-# )
+from app.core.services.payments.analytics import (  # noqa: F401
+    r7_pico_fim_periodo,
+    r7_periodos_atipicos,
+    r7_validade_vencida,
+)
 
 # Bloco D — 4 detectores complexos.
 # from app.core.services.payments.analytics import (  # noqa: F401
