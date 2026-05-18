@@ -9,7 +9,18 @@
   Ambos os caminhos recebem `runs` (lista de dicts já formatados) e o flag
   opcional `just_uploaded` para destacar a linha recém-enfileirada.
 #}
-<div id="runs-section">
+{#
+  Auto-poll: se ao menos 1 run está em pending/running, recarrega o
+  fragmento inteiro a cada 3s. Quando todos forem terminais (completed/
+  failed), o atributo hx-trigger some — para o polling sozinho.
+#}
+{% set has_active = runs | selectattr('status', 'in', ['pending', 'running']) | list | length > 0 %}
+<div id="runs-section"
+     {% if has_active %}
+     hx-get="/payments/empreiteiras-wf/ingestao/runs"
+     hx-trigger="every 3s"
+     hx-swap="outerHTML"
+     {% endif %}>
   <table class="w-full text-sm">
     <thead class="text-[11px] uppercase tracking-wider text-neutral-500 bg-neutral-50">
       <tr>

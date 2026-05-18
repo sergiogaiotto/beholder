@@ -493,3 +493,152 @@ async def test_ingestao_run_status_400_for_bad_uuid():
         await _login_as(client, "ctrl_bad", "senha-123")
         resp = await client.get("/payments/empreiteiras-wf/ingestao/runs/not-a-uuid")
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Bloco B — Polling HTMX + acceptance E2E
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_partial_polls_when_run_is_active(_payments_schema, tmp_path):
+    """Quando há run em pending/running, o partial inclui hx-trigger=every 3s.
+    Quando todos forem terminais, o trigger some — para o polling sozinho.
+    """
+    from app.main import app
+    from app.adapters.storage.filesystem_document_store import (
+        FilesystemDocumentStore,
+    )
+
+    store = FilesystemDocumentStore(root=tmp_path)
+    user_id = await _create_user("ctrl_poll", "senha-123", roles=["controladoria"])
+    svc = PaymentsIngestionService(document_store=store)
+    run_id = await svc.queue_upload(
+        file_bytes=_fake_xlsx_bytes(), filename="poll.xlsx",
+        projection_name="supplier_bridge", user_id=user_id,
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ctrl_poll", "senha-123")
+        resp = await client.get("/payments/empreiteiras-wf/ingestao/runs")
+    body = resp.text
+    # PENDING → hx-trigger ativo.
+    assert 'hx-trigger="every 3s"' in body
+    assert 'hx-get="/payments/empreiteiras-wf/ingestao/runs"' in body
+
+    # Marca como completed → polling para.
+    repo = PgIngestionRunRepository()
+    await repo.mark_completed(
+        run_id, rows_read=10, rows_inserted=10, rows_skipped=0, rows_failed=0,
+    )
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ctrl_poll", "senha-123")
+        resp = await client.get("/payments/empreiteiras-wf/ingestao/runs")
+    body = resp.text
+    assert 'hx-trigger="every 3s"' not in body
+
+
+@pytest.mark.asyncio
+async def test_nav_left_shows_ingestao_entry_under_pagamentos():
+    """Sub-entry 'Ingestão' aparece no grupo Pagamentos da nav esquerda
+    para usuários com role permitida."""
+    from app.main import app
+
+    await _create_user("ctrl_nav_ing", "senha-123", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ctrl_nav_ing", "senha-123")
+        resp = await client.get("/")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Pagamentos" in body
+    assert "Empreiteiras WF" in body
+    assert "Ingestão" in body
+    assert 'href="/payments/empreiteiras-wf/ingestao"' in body
+
+
+@pytest.mark.asyncio
+async def test_acceptance_e2e_ingestao_full_journey(monkeypatch):
+    """E2E completo da Fase 3.5:
+      1. Login controladoria
+      2. GET /ingestao (cards aparecem, tabela vazia)
+      3. POST upload com XLSX → 303 com just_uploaded
+      4. GET /ingestao?just_uploaded=<id> → banner + linha PENDING na tabela
+      5. GET /runs partial → contém o run, com polling ativo (pending)
+      6. Simula conclusão (mark_completed direto no repo, como se actor
+         tivesse rodado)
+      7. GET /runs partial → polling para; status virou Concluído
+    """
+    from app.main import app
+    from app.workers import payments_ingest
+
+    # Stub do actor: aceita .send sem Redis.
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        payments_ingest.ingest_source, "send",
+        lambda *a, **kw: sent.append(kw) or type("Msg", (), {"message_id": "x"})(),
+    )
+
+    await _create_user("e2e_user", "senha-e2e-123", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "e2e_user", "senha-e2e-123")
+
+        # 2. GET /ingestao — cards + tabela vazia.
+        resp = await client.get("/payments/empreiteiras-wf/ingestao")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Ingestão de Arquivos" in body
+        assert "Contratos-Empreiteiras" in body  # primeiro card
+        assert "nenhuma carga ainda" in body
+
+        # 3. POST upload
+        resp = await client.post(
+            "/payments/empreiteiras-wf/ingestao/upload",
+            data={"projection_name": "wf_payment"},
+            files={"file": ("analitico_wf.xlsx", _fake_xlsx_bytes(),
+                            "application/vnd.openxmlformats")},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        run_id = resp.headers["location"].split("=", 1)[1]
+        # Actor disparado uma vez com o run_id.
+        assert len(sent) == 1
+        assert sent[0]["run_id"] == run_id
+        assert sent[0]["projection_name"] == "wf_payment"
+
+        # 4. GET /ingestao com just_uploaded → banner + linha PENDING.
+        resp = await client.get(resp.headers["location"])
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Upload enfileirado" in body
+        assert "analitico_wf.xlsx" in body
+        assert "Aguardando" in body  # status_label do PENDING
+
+        # 5. Partial reflete o pending + polling ativo.
+        resp = await client.get("/payments/empreiteiras-wf/ingestao/runs")
+        body = resp.text
+        assert "analitico_wf.xlsx" in body
+        assert 'hx-trigger="every 3s"' in body
+
+        # 6. Simula conclusão (worker rodaria aqui).
+        repo = PgIngestionRunRepository()
+        await repo.mark_completed(
+            UUID(run_id),
+            rows_read=869_663, rows_inserted=869_663,
+            rows_skipped=0, rows_failed=0,
+        )
+
+        # 7. Partial agora sem polling, status Concluído, rows aparecem.
+        resp = await client.get("/payments/empreiteiras-wf/ingestao/runs")
+        body = resp.text
+        assert "Concluído" in body
+        assert "869,663" in body  # rows_inserted formatado
+        assert 'hx-trigger="every 3s"' not in body
+
+        # Status JSON também reflete.
+        resp = await client.get(f"/payments/empreiteiras-wf/ingestao/runs/{run_id}")
+        data = resp.json()
+        assert data["status"] == "completed"
+        assert data["rows_inserted"] == 869_663
