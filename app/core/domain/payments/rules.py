@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -81,7 +81,7 @@ class ReconciliationFinding(PaymentsBaseModel):
     purchase_order_documento: str
     purchase_order_item: str | None = None
     wf_payment_id: int | None = None
-    wf_payment_data_pedido: datetime | None = None  # DATE em DB, dt aceita
+    wf_payment_data_pedido: date | None = None  # DATE em DB
 
     # referências ao contrato
     contract_master_id: UUID | None = None

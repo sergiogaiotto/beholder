@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
@@ -157,3 +158,12 @@ def test_finding_status_transitions():
     for status in ["open", "in_analysis", "accepted_fp", "escalated", "blocked"]:
         f = ReconciliationFinding(**_finding_kwargs(status=status))
         assert f.status.value == status
+
+
+def test_finding_accepts_wf_payment_data_pedido_as_date():
+    """wf_payment_data_pedido é DATE no DB — deve aceitar `date` (não datetime)."""
+    f = ReconciliationFinding(**_finding_kwargs(
+        wf_payment_id=12345,
+        wf_payment_data_pedido=date(2025, 6, 1),
+    ))
+    assert f.wf_payment_data_pedido == date(2025, 6, 1)
