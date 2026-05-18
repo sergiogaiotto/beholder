@@ -526,6 +526,41 @@ async def skills_page(
     )
 
 
+# ---------- Pagamentos → Empreiteiras WF (Fase 3) ----------
+
+@router.get("/payments/empreiteiras-wf", response_class=HTMLResponse)
+async def payments_empreiteiras_wf_page(
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+):
+    """Dashboard de Monitoramento de Pagamentos para Empreiteiras-WF.
+
+    Acesso: root/admin/supervisor/controladoria. A role `controladoria` é
+    nova (Fase 3) — o gate aceita strings livres, não exige migration de
+    enum. Outras roles tomam 403 via `_require_any_role`.
+
+    Bloco A: payload servido por `PaymentsDashboardService` stub (mock
+    data). Blocos B-D substituem por queries reais sem mexer no template.
+    """
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.dashboard_service import PaymentsDashboardService
+
+    svc = PaymentsDashboardService()
+    dashboard = await svc.dashboard_payload()
+
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/index.html",
+        await _ctx(
+            request, user,
+            active_module="empreiteiras_wf",
+            dashboard=dashboard,
+        ),
+    )
+
+
 # ---------- Building Blocks (catálogo) ----------
 
 @router.get("/blocks", response_class=HTMLResponse)

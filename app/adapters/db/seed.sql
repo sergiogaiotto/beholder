@@ -22,7 +22,12 @@ INSERT INTO roles (name) VALUES
     ('analista_n3'),
     ('analista_n2'),
     ('analista_n1'),
-    ('finops')
+    ('finops'),
+    -- Controladoria (Fase 3): acesso ao dashboard Empreiteiras-WF e inbox de
+    -- alertas. Gate em pages.py via _require_any_role(['admin','supervisor',
+    -- 'controladoria']). Sem permissões adicionais hoje — escopo gerenciado
+    -- pela lista de rotas que aceitam a role.
+    ('controladoria')
 ON CONFLICT (name) DO NOTHING;
 
 INSERT INTO permissions (code) VALUES
