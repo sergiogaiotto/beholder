@@ -26,9 +26,9 @@ from app.core.services.payments.analytics import (  # noqa: F401
 )
 
 # Bloco D — 4 detectores complexos.
-# from app.core.services.payments.analytics import (  # noqa: F401
-#     r7_consumo_perfil,
-#     r7_empreiteira_padrao,
-#     r7_lpu_padrao_servico,
-#     r7_recorr_variavel,
-# )
+from app.core.services.payments.analytics import (  # noqa: F401
+    r7_consumo_perfil,
+    r7_empreiteira_padrao,
+    r7_lpu_padrao_servico,
+    r7_recorr_variavel,
+)
