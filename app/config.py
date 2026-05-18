@@ -29,7 +29,12 @@ class Settings(BaseSettings):
     # Aceita tanto DSN puro (postgresql://user:pass@host:port/db) quanto a
     # forma SQLAlchemy (postgresql+asyncpg://...). O método `pg_dsn` normaliza
     # para o formato esperado por asyncpg (sem o sufixo +asyncpg).
-    database_url: str = "postgresql://beholder:beholder@localhost:5432/beholder"
+    #
+    # 127.0.0.1 (não 'localhost') pra evitar IPv6 trap no Windows:
+    # asyncpg pode travar em SSL upgrade quando `localhost` resolve para
+    # `[::1]` (IPv6). Custou 30 min de debug no Bloco G. Detalhes em
+    # memory/dsn_localhost_ipv6.md.
+    database_url: str = "postgresql://beholder:beholder@127.0.0.1:5432/beholder"
 
     # Pool de conexões — calibrado para throughput.
     # min_size: conexões "warm" mantidas no pool (latência baixa em pico)

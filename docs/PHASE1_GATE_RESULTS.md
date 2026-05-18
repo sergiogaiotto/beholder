@@ -37,10 +37,31 @@
 Fix aplicado pós-execução 2: `WFPayment.mes_medicao` removeu regex (aceita
 'PREVISTO', 'ABERTO', etc. — rules engine valida formato quando relevante).
 
-### Execução 3 (planejada)
+### Execução 3 (interrompida — Docker Desktop caiu mid-run)
 
-Docker Desktop offline durante tentativa — não executou. Rerun pendente.
-Estimativa com todos os fixes: ~540-600s total.
+Docker Desktop offline durante tentativa — não executou completo. Recuperado
+no Run 8.
+
+### Execução 8 — ✓ GATE PASS
+
+Todos os fixes aplicados (incluindo `localhost → 127.0.0.1` no .env por
+IPv6 trap do Windows — ver L7 abaixo).
+
+| Source | Rows inserted | Tempo | Rate | Status |
+|---|---:|---:|---:|:---:|
+| supplier_bridge | 146 | 0.9s | 169/s | ✓ |
+| gc | 44.781 | 9.4s | 4.781/s | ✓ |
+| ekko | 1.893 | 3.0s | 639/s | ✓ |
+| ekpo | 25.066 | 34.5s | 727/s | ✓ |
+| esll | 44.781 | 5.8s | 7.742/s | ✓ |
+| cost_center | 963 (85 skip por CONTA null) | 0.7s | 1.393/s | ✓ |
+| wf_payment | 750.005 (119.657 skip ✓ Pré-B §3.4 14%) | 370.2s | 2.026/s | ✓ |
+| msrv5 | 2.909.411 | 193.4s | 15.043/s | ✓ |
+| **TOTAL** | **3.776.046** | **617.8s** (10.3 min) | **6.111/s sustained** | **✓** |
+
+- **SLA <700s**: ✓ PASS (folga 82s, 12%)
+- **All sources OK**: ✓ (incl. skips esperados)
+- **GATE**: ✓ PASS
 
 ## Patches aplicados durante G.3/G.4
 
@@ -71,6 +92,7 @@ Estimativa com todos os fixes: ~540-600s total.
 | L4 | batch_size 50k-100k amortiza overhead executemany em volumes 800k+ | Tunar por entidade no YAML `load.batch_size` |
 | L5 | MSRV5 (cp1252 streaming + executemany) atinge ~13k rows/s sustained | 3.1M rows em ~220s — limite com hardware atual |
 | L6 | Docker Desktop pode cair silenciosamente — script trava em I/O com 0 bytes output | Sanity check antes de gate longo: `docker exec ... psql -c "SELECT 1"` |
+| L7 | `localhost` → IPv6 `[::1]` no Windows trava asyncpg em SSL nego (TimeoutError disfarçado de "init schema timeout"); custou 30min de debug | DSN sempre `127.0.0.1`. Documentado em `memory/dsn_localhost_ipv6.md`. TODO: mudar default em `app/config.py` |
 
 ## SLA — ajuste pós-medição
 

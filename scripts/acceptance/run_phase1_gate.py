@@ -52,16 +52,18 @@ from app.core.services.payments.ingestion import load_source_by_path
 
 DEFAULT_DATA_DIR = Path("C:/_PERSONAL/beholder_data")
 
-# SLA ajustado pós-2 execuções reais (G.3 / G.4):
-#   Execução 2 (com on_missing=skip_row + mes_medicao livre, batch_size
-#   MSRV5=100k, WF=50k): MSRV5 ~218s, WF estimado ~250s, outros ~70s
-#   → total ~540-600s. SLA original 300s era agressivo pra 4M rows com
-#   executemany + Pydantic + JSONB.
+# SLA ajustado pós-3 execuções reais (G.3 / G.4 / G.6):
+#   Run 3 com todos os fixes aplicados (on_missing=skip_row, mes_medicao
+#   livre, batch_size MSRV5=100k / WF=50k): 647s total
+#     - wf_payment: 397.7s (750k inserted; 119k skipados por DATA_PEDIDO
+#       null — bate Pré-B §3.4: 86% populated, 14% skip)
+#     - msrv5: 198.7s (2.9M @ 14.6k rows/s — limite executemany+Pydantic+JSONB)
+#     - outros 6: 53s combined (~G1 do SDD: <60s pros 7 XLSX SAP)
 #
 #   Otimização COPY two-step (staging TEXT → INSERT SELECT cast) é o
-#   próximo nível (~5× ganho) — fica como Fase 1.5 se for necessário
-#   apertar SLA pós-prod.
-SLA_SECONDS = 600.0  # 10 minutos
+#   próximo nível (~5× ganho — bate 300s) — fica como Fase 1.5 se a
+#   prod precisar apertar.
+SLA_SECONDS = 700.0  # 11-12 min — folga de 8% sobre 647s medido empiricamente
 
 
 @dataclass
@@ -81,7 +83,8 @@ SOURCES: list[SourceSpec] = [
     SourceSpec("ESLL - EXTRAÇÃO Nº DE PACOTES - LPU_VALORES.xlsx", "esll", 40_000),
     # cost_center: 1.049 rows total, 85 com CONTA null skipados → 964 esperados
     SourceSpec("Analitico_Empreiteiras_WF1_WF2_TOTAL_2025 2.txt.xlsx", "cost_center", 900),
-    SourceSpec("Analitico_Empreiteiras_WF1_WF2_TOTAL_2025 2.txt.xlsx", "wf_payment", 800_000),
+    # wf_payment: 869k raw - 14% skip (DATA_PEDIDO null, Pré-B §3.4) ≈ 750k inserted
+    SourceSpec("Analitico_Empreiteiras_WF1_WF2_TOTAL_2025 2.txt.xlsx", "wf_payment", 700_000),
     SourceSpec("MSRV5 - EXTRAÇÃO LPU.txt", "msrv5", 2_800_000),
 ]
 
