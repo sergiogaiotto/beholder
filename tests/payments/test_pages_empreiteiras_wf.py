@@ -584,6 +584,137 @@ async def test_fornecedores_partial_route_applies_filters():
 
 
 @pytest.mark.asyncio
+async def test_inbox_payload_empty_db(_ensure_payments_schema):
+    """Inbox em DB vazio: 0 findings, paginação coerente, catálogos vazios."""
+    svc = PaymentsDashboardService()
+    inbox = await svc.inbox_payload()
+    assert inbox["findings"]["total"] == 0
+    assert inbox["findings"]["rows"] == []
+    assert inbox["findings"]["page"] == 1
+    assert inbox["findings"]["pages"] == 1  # min 1 mesmo com 0
+    assert inbox["filtros"]["rule_codes"] == []
+    # Statuses sempre fixos (5 estados do workflow).
+    assert len(inbox["filtros"]["statuses"]) == 5
+
+
+@pytest.mark.asyncio
+async def test_inbox_payload_after_seed_shows_both_findings():
+    """Seed cria 2 findings ambos open — inbox os retorna por padrão."""
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    inbox = await svc.inbox_payload()
+    assert inbox["findings"]["total"] == 2
+    items = inbox["findings"]["rows"]
+    assert {it["rule_code"] for it in items} == {"REGRA_LPU", "REGRA_5_UF"}
+    # Cada item tem campos formatados.
+    for it in items:
+        assert it["value_at_risk_brl_fmt"].startswith("R$")
+        assert it["severity_label"] in ("Alerta Op.", "Alerta Proc.", "St. Atípica")
+        assert it["status_label"] == "Aberto"
+        assert "/" in it["detected_at_fmt"]  # data dd/mm/YYYY
+
+
+@pytest.mark.asyncio
+async def test_inbox_filters_by_severity():
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    inbox = await svc.inbox_payload(severity="high")
+    assert inbox["findings"]["total"] == 1
+    assert inbox["findings"]["rows"][0]["rule_code"] == "REGRA_LPU"
+
+
+@pytest.mark.asyncio
+async def test_inbox_filters_by_rule_code_and_search():
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    # Filtro por rule_code
+    inbox = await svc.inbox_payload(rule_code="REGRA_5_UF")
+    assert inbox["findings"]["total"] == 1
+    # Filtro por search no rule_code
+    inbox = await svc.inbox_payload(search="LPU")
+    assert inbox["findings"]["total"] == 1
+    # Filtro por search no purchase_order
+    inbox = await svc.inbox_payload(search="4500000002")
+    assert inbox["findings"]["total"] == 1
+    assert inbox["findings"]["rows"][0]["rule_code"] == "REGRA_5_UF"
+
+
+@pytest.mark.asyncio
+async def test_inbox_pagination_basic():
+    """per_page=1 dividindo 2 findings → 2 páginas."""
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    p1 = await svc.inbox_payload(per_page=1, page=1)
+    p2 = await svc.inbox_payload(per_page=1, page=2)
+    assert p1["findings"]["total"] == 2
+    assert p1["findings"]["pages"] == 2
+    assert len(p1["findings"]["rows"]) == 1
+    assert len(p2["findings"]["rows"]) == 1
+    # IDs diferentes nas duas páginas (sem overlap).
+    assert p1["findings"]["rows"][0]["id"] != p2["findings"]["rows"][0]["id"]
+
+
+@pytest.mark.asyncio
+async def test_alertas_route_renders_with_seed():
+    """Rota /alertas: 200, tabela com 2 findings, breadcrumb pra dashboard."""
+    from app.main import app
+
+    await _seed_minimal_dataset()
+    await _create_user("ctrl_alertas", "senha-teste-123", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ctrl_alertas", "senha-teste-123")
+        resp = await client.get("/payments/empreiteiras-wf/alertas")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Inbox de Alertas" in body
+    assert "REGRA_LPU" in body
+    assert "REGRA_5_UF" in body
+    # Breadcrumb pro dashboard.
+    assert 'href="/payments/empreiteiras-wf"' in body
+
+
+@pytest.mark.asyncio
+async def test_alertas_route_filter_via_querystring():
+    """Filtro severity passa pelo querystring e converte label→severity."""
+    from app.main import app
+
+    await _seed_minimal_dataset()
+    await _create_user("ctrl_alertas2", "senha-teste-123", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ctrl_alertas2", "senha-teste-123")
+        resp = await client.get(
+            "/payments/empreiteiras-wf/alertas",
+            params={"severity": "Alerta Op."},
+        )
+    assert resp.status_code == 200
+    body = resp.text
+    # Só o REGRA_LPU (severity=high) aparece na tabela. REGRA_5_UF (medium)
+    # ainda aparece no <option> do dropdown 'Regra' (catálogo completo),
+    # então comparo a célula da tabela (font-mono text-xs no <td>).
+    assert "REGRA_LPU" in body
+    assert '<td class="py-2 px-3 font-mono text-xs">REGRA_5_UF</td>' not in body
+
+
+@pytest.mark.asyncio
+async def test_alertas_route_requires_role():
+    """analista_n3 → 403; sem auth → redirect."""
+    from app.main import app
+
+    await _create_user("n3_alertas", "senha-teste-123", roles=["analista_n3"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Sem login
+        resp = await client.get("/payments/empreiteiras-wf/alertas", follow_redirects=False)
+        assert resp.status_code in (302, 307)
+        # Login com role insuficiente
+        await _login_as(client, "n3_alertas", "senha-teste-123")
+        resp = await client.get("/payments/empreiteiras-wf/alertas")
+        assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_dashboard_page_carries_active_filters_into_inputs():
     """Filtros aplicados na URL aparecem como `value` no form (state-aware)."""
     from app.main import app

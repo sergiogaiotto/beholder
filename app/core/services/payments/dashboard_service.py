@@ -382,6 +382,90 @@ class PaymentsDashboardService:
             severity=severity,
         )
 
+    # =========================================================== Inbox /alertas (Bloco E)
+
+    # Mapeamento status interno → label visível na UI.
+    STATUS_LABELS = {
+        "open":         "Aberto",
+        "in_analysis":  "Em Análise",
+        "escalated":    "Escalado",
+        "accepted_fp":  "Falso Positivo",
+        "blocked":      "Bloqueado",
+    }
+
+    async def inbox_payload(
+        self,
+        *,
+        severity: str | None = None,
+        rule_code: str | None = None,
+        status: str | None = None,
+        search: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict[str, Any]:
+        """Payload do template `alertas.html`. Filtros e paginação.
+
+        Se `status` for None, mostra apenas abertos (workflow ativo);
+        passe 'all' para incluir aceitos/bloqueados/escalados (auditoria).
+        """
+        if status == "all":
+            status_in = tuple(self.STATUS_LABELS.keys())
+        elif status:
+            status_in = (status,)
+        else:
+            status_in = None  # repo aplica _OPEN_STATUSES default
+
+        # Catálogos + lista em paralelo (3 round-trips).
+        findings_page, rule_codes, ufs = await asyncio.gather(
+            self.repo.list_findings(
+                severity=severity,
+                rule_code=rule_code,
+                status_in=status_in,
+                search=search,
+                page=page,
+                per_page=per_page,
+            ),
+            self.repo.list_rule_codes_with_findings(),
+            self.repo.list_ufs_disponiveis(),
+        )
+
+        # Enriquece cada item com formatação BR.
+        for item in findings_page["rows"]:
+            item["value_at_risk_brl_fmt"] = _fmt_brl(item["value_at_risk_brl"])
+            item["delta_pct_fmt"] = (
+                _fmt_pct(item["delta_pct"], signed=True)
+                if item["delta_pct"] is not None
+                else "—"
+            )
+            item["severity_label"] = {
+                "high": "Alerta Op.",
+                "medium": "Alerta Proc.",
+                "low": "St. Atípica",
+            }.get(item["severity"], item["severity"])
+            item["status_label"] = self.STATUS_LABELS.get(
+                item["status"], item["status"]
+            )
+            item["detected_at_fmt"] = (
+                item["detected_at"].strftime("%d/%m/%Y %H:%M")
+                if item["detected_at"]
+                else "—"
+            )
+
+        return {
+            "findings": findings_page,
+            "filtros": {
+                "rule_codes": rule_codes,
+                "tipos_alerta": [label for label, _sev in self.TIPOS_ALERTA],
+                "statuses": list(self.STATUS_LABELS.items()),
+            },
+            "active_filters": {
+                "severity": severity or "",
+                "rule_code": rule_code or "",
+                "status": status or "",
+                "search": search or "",
+            },
+        }
+
     async def filtros_disponiveis(self) -> dict[str, list[Any]]:
         """Catálogo para popular os dropdowns da barra de filtros do
         dashboard: UFs presentes em wf_payment + tipos de alerta fixos.

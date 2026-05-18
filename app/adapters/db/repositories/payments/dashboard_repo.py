@@ -340,6 +340,131 @@ class PaymentsDashboardRepository:
             for r in rows
         ]
 
+    # =========================================================== Inbox /alertas (Bloco E)
+
+    async def list_findings(
+        self,
+        *,
+        severity: str | None = None,
+        rule_code: str | None = None,
+        status_in: tuple[str, ...] | None = None,
+        search: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict[str, Any]:
+        """Lista paginada de findings com filtros opcionais.
+
+        Devolve `{items, total, page, per_page, pages}`. Sempre faz JOIN
+        com supplier_bridge para mostrar nome do fornecedor. Ordenação fixa
+        em `detected_at DESC` (mais recente primeiro).
+
+        Filtros:
+          - severity: 'high' | 'medium' | 'low'
+          - rule_code: 'REGRA_LPU', 'REGRA_5_UF', etc.
+          - status_in: tupla de statuses (default = abertos)
+          - search: ILIKE em rule_code ou purchase_order_documento
+        """
+        page = max(1, page)
+        per_page = max(1, min(100, per_page))  # cap em 100 pra proteger pool
+        offset = (page - 1) * per_page
+
+        where = ["1=1"]
+        params: list[Any] = []
+        if severity:
+            params.append(severity)
+            where.append(f"rf.severity = ${len(params)}")
+        if rule_code:
+            params.append(rule_code)
+            where.append(f"rf.rule_code = ${len(params)}")
+        if status_in is None:
+            status_in = _OPEN_STATUSES
+        params.append(list(status_in))
+        where.append(f"rf.status = ANY(${len(params)}::text[])")
+        if search:
+            params.append(f"%{search}%")
+            i1 = len(params)
+            params.append(f"%{search}%")
+            i2 = len(params)
+            where.append(
+                f"(rf.rule_code ILIKE ${i1} OR rf.purchase_order_documento ILIKE ${i2})"
+            )
+
+        where_clause = " AND ".join(where)
+        async with connect_payments() as c:
+            total = await c.fetchval(
+                f"""
+                SELECT COUNT(*)
+                FROM payments.reconciliation_finding rf
+                WHERE {where_clause}
+                """,
+                *params,
+            )
+            params_with_pagination = [*params, per_page, offset]
+            i_lim = len(params_with_pagination) - 1
+            i_off = len(params_with_pagination)
+            rows = await c.fetch(
+                f"""
+                SELECT
+                    rf.id,
+                    rf.rule_code,
+                    rf.severity,
+                    rf.status,
+                    rf.purchase_order_documento,
+                    rf.value_at_risk_brl,
+                    rf.delta_pct,
+                    rf.detected_at,
+                    sb.empreiteira AS supplier_nome,
+                    sb.cnpj        AS supplier_cnpj
+                FROM payments.reconciliation_finding rf
+                LEFT JOIN payments.supplier_bridge sb ON sb.id = rf.supplier_id
+                WHERE {where_clause}
+                ORDER BY rf.detected_at DESC, rf.id
+                LIMIT ${i_lim} OFFSET ${i_off}
+                """,
+                *params_with_pagination,
+            )
+
+        items = [
+            {
+                "id": str(r["id"]),
+                "rule_code": r["rule_code"],
+                "severity": r["severity"],
+                "status": r["status"],
+                "purchase_order_documento": r["purchase_order_documento"],
+                "value_at_risk_brl": Decimal(r["value_at_risk_brl"] or 0),
+                "delta_pct": float(r["delta_pct"]) if r["delta_pct"] is not None else None,
+                "detected_at": r["detected_at"],
+                "supplier_nome": r["supplier_nome"] or "—",
+                "supplier_cnpj": r["supplier_cnpj"] or "—",
+            }
+            for r in rows
+        ]
+
+        total_int = int(total or 0)
+        pages = max(1, (total_int + per_page - 1) // per_page)
+        # `rows` (em vez de `items`) evita colisão com `dict.items()` em Jinja
+        # quando o template faz `findings.rows`.
+        return {
+            "rows": items,
+            "total": total_int,
+            "page": page,
+            "per_page": per_page,
+            "pages": pages,
+        }
+
+    async def list_rule_codes_with_findings(self) -> list[str]:
+        """rule_codes únicos que têm pelo menos 1 finding (qualquer status).
+        Alimenta o dropdown 'Regra' do inbox de alertas."""
+        async with connect_payments() as c:
+            rows = await c.fetch(
+                """
+                SELECT DISTINCT rule_code
+                FROM payments.reconciliation_finding
+                ORDER BY rule_code
+                """
+            )
+        return [r["rule_code"] for r in rows]
+
     async def list_ufs_disponiveis(self) -> list[str]:
         """UFs distintas presentes em wf_payment — alimenta o dropdown
         de filtro 'Estado'. Excluindo NULL e ordem alfabética."""

@@ -565,6 +565,53 @@ async def payments_empreiteiras_wf_page(
     )
 
 
+@router.get("/payments/empreiteiras-wf/alertas", response_class=HTMLResponse)
+async def payments_empreiteiras_wf_alertas_page(
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+    severity: str | None = None,
+    rule_code: str | None = None,
+    status: str | None = None,
+    search: str | None = None,
+    page: int = 1,
+):
+    """Inbox /alertas — lista paginada de findings com filtros.
+
+    Mesma matriz de acesso do dashboard. Severity aceita 'high'/'medium'/'low';
+    UI passa o label visível (ex.: 'Alerta Op.') que o service converte
+    antes de chamar o repo.
+    """
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.dashboard_service import PaymentsDashboardService
+
+    svc = PaymentsDashboardService()
+    # severity da UI vem como label — converte aqui.
+    sev_map = dict(svc.TIPOS_ALERTA)
+    severity_internal = sev_map.get(severity, severity if severity else None)
+
+    inbox = await svc.inbox_payload(
+        severity=severity_internal,
+        rule_code=rule_code or None,
+        status=status or None,
+        search=search or None,
+        page=max(1, page),
+    )
+
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/alertas.html",
+        await _ctx(
+            request, user,
+            active_module="empreiteiras_wf",
+            inbox=inbox,
+            # Reverse map p/ exibir o label nos selects sem extra Jinja logic.
+            severity_label_active=severity or "",
+        ),
+    )
+
+
 @router.get("/payments/empreiteiras-wf/fornecedores", response_class=HTMLResponse)
 async def payments_empreiteiras_wf_fornecedores_partial(
     request: Request,
