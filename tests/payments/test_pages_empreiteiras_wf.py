@@ -935,3 +935,192 @@ async def test_dashboard_page_carries_active_filters_into_inputs():
     assert 'value="EQS"' in body
     # Tipo aparece selected.
     assert '<option value="Alerta Proc." selected>' in body
+
+
+# ---------------------------------------------------------------------------
+# Bloco G — Acceptance E2E
+# ---------------------------------------------------------------------------
+
+import pytest as _pytest_g
+
+
+@_pytest_g.mark.asyncio
+async def test_acceptance_e2e_controladoria_full_journey():
+    """E2E: controladoria entra → dashboard → filtra fornecedor (HTMX) →
+    inbox → filtra severity → detalhe → decide → confirma status atualizado.
+
+    Cobre o caminho feliz completo da Fase 3 num único cenário, validando
+    integração de todas as rotas + service + repo + templates.
+    """
+    from app.main import app
+
+    await _seed_minimal_dataset()
+    await _create_user("ctrl_e2e", "senha-teste-e2e", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Login
+        await _login_as(client, "ctrl_e2e", "senha-teste-e2e")
+
+        # 2. Dashboard renderiza com KPIs reais (não mais zeros).
+        resp = await client.get("/payments/empreiteiras-wf")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Monitoramento de Pagamentos para Empreiteiras" in body
+        assert "CONTRATOS MONITORADOS" in body
+        # KPI contratos = 2 (seed inseriu 2 monitorados).
+        assert ">2<" in body  # value="2" no card
+        # Charts incluídos.
+        assert "chartAlertasTipo" in body
+        # Tabela fornecedores renderizada via partial inline.
+        assert 'id="fornecedores-tbody"' in body
+        assert "ENGEMAN MNT" in body
+        assert "EQS ENGENHARIA" in body
+
+        # 3. HTMX filter: busca por ENGEMAN — chama o partial route.
+        resp = await client.get(
+            "/payments/empreiteiras-wf/fornecedores",
+            params={"search": "ENGEMAN"},
+        )
+        assert resp.status_code == 200
+        body = resp.text
+        assert 'id="fornecedores-tbody"' in body  # mesmo markup
+        assert "ENGEMAN MNT" in body
+        assert "EQS ENGENHARIA" not in body
+        # Não tem shell — só o partial.
+        assert "Monitoramento de Pagamentos" not in body
+
+        # 4. Inbox de alertas: 2 findings (open).
+        resp = await client.get("/payments/empreiteiras-wf/alertas")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Inbox de Alertas" in body
+        assert "REGRA_LPU" in body
+        assert "REGRA_5_UF" in body
+        # Status badge "Aberto" pra ambos.
+        assert body.count(">Aberto<") >= 2
+
+        # 5. Filtra inbox por severity 'Alerta Op.' (label).
+        resp = await client.get(
+            "/payments/empreiteiras-wf/alertas",
+            params={"severity": "Alerta Op."},
+        )
+        body = resp.text
+        # Só REGRA_LPU na tabela; REGRA_5_UF sai (medium).
+        assert "REGRA_LPU" in body
+        assert '<td class="py-2 px-3 font-mono text-xs">REGRA_5_UF</td>' not in body
+
+        # 6. Pega o ID do finding REGRA_LPU pra fazer drill-down.
+        svc = PaymentsDashboardService()
+        inbox = await svc.inbox_payload(rule_code="REGRA_LPU")
+        finding_id = inbox["findings"]["rows"][0]["id"]
+
+        # 7. Detalhe do finding.
+        resp = await client.get(f"/payments/empreiteiras-wf/alertas/{finding_id}")
+        assert resp.status_code == 200
+        body = resp.text
+        # Breadcrumb + dados + form decisão.
+        assert "Empreiteiras WF" in body
+        assert "Inbox de Alertas" not in body  # não é o inbox
+        assert "ENGEMAN MNT" in body
+        assert "R$ 1.000,00" in body
+        assert "+110.0%" in body
+        assert 'name="new_status"' in body
+        # Status atual = Aberto.
+        assert ">Aberto<" in body
+
+        # 8. POST decide → in_analysis.
+        resp = await client.post(
+            f"/payments/empreiteiras-wf/alertas/{finding_id}/decide",
+            data={"new_status": "in_analysis", "decision_reason": "investigando E2E"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        # Segue redirect.
+        resp = await client.get(resp.headers["location"])
+        assert resp.status_code == 200
+        body = resp.text
+        # Status agora = Em Análise; motivo salvo.
+        assert ">Em Análise<" in body
+        assert "investigando E2E" in body
+        # Última decisão exibe o usuário.
+        assert "ctrl_e2e" in body
+
+
+@_pytest_g.mark.asyncio
+async def test_acceptance_role_matrix_for_all_routes():
+    """Matriz roles × rotas — confirma gate consistente em TODAS as rotas
+    da Fase 3 (dashboard, partial, inbox, detalhe).
+
+    Roles testadas:
+      - root          → 200 em todas (bypass)
+      - admin         → 200 em todas (allowed)
+      - supervisor    → 200 em todas (allowed)
+      - controladoria → 200 em todas (allowed Fase 3)
+      - analista_n3   → 403 em todas
+      - finops        → 403 em todas (não está no allowed)
+      - anônimo       → 307 em todas (redirect /login)
+    """
+    from app.main import app
+
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    inbox = await svc.inbox_payload()
+    finding_id = inbox["findings"]["rows"][0]["id"]
+
+    routes = [
+        ("/payments/empreiteiras-wf",                                       "GET",  None),
+        ("/payments/empreiteiras-wf/fornecedores",                          "GET",  None),
+        ("/payments/empreiteiras-wf/alertas",                               "GET",  None),
+        (f"/payments/empreiteiras-wf/alertas/{finding_id}",                 "GET",  None),
+    ]
+    allow_roles = ["root", "admin", "supervisor", "controladoria"]
+    deny_roles = ["analista_n3", "finops"]
+
+    transport = ASGITransport(app=app)
+
+    # Anônimo: redirect em todas.
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        for url, method, _ in routes:
+            resp = await client.request(method, url, follow_redirects=False)
+            assert resp.status_code in (302, 307), f"anon @ {url} → {resp.status_code}"
+            assert "/login" in resp.headers.get("location", "")
+
+    # Allow: 200 em todas.
+    for role in allow_roles:
+        username = f"matrix_allow_{role}"
+        await _create_user(username, "senha-matrix-123", roles=[role])
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await _login_as(client, username, "senha-matrix-123")
+            for url, method, _ in routes:
+                resp = await client.request(method, url)
+                assert resp.status_code == 200, f"{role} @ {url} → {resp.status_code}"
+
+    # Deny: 403 em todas.
+    for role in deny_roles:
+        username = f"matrix_deny_{role}"
+        await _create_user(username, "senha-matrix-123", roles=[role])
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await _login_as(client, username, "senha-matrix-123")
+            for url, method, _ in routes:
+                resp = await client.request(method, url)
+                assert resp.status_code == 403, f"{role} @ {url} → {resp.status_code}"
+
+
+@_pytest_g.mark.asyncio
+async def test_acceptance_nav_left_shows_pagamentos_group():
+    """Nav lateral mostra grupo 'Pagamentos' com entry 'Empreiteiras WF'
+    apenas para roles permitidas."""
+    from app.main import app
+
+    await _create_user("ctrl_nav", "senha-nav-123", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ctrl_nav", "senha-nav-123")
+        # Cockpit (renderiza nav_left.html).
+        resp = await client.get("/")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Pagamentos" in body
+        assert "Empreiteiras WF" in body
+        # Link aponta pra rota correta.
+        assert 'href="/payments/empreiteiras-wf"' in body
