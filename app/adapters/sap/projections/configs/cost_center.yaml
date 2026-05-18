@@ -1,0 +1,19 @@
+# Projeção da sheet "CC + CONTA" do `Analitico_Empreiteiras_WF1_WF2_TOTAL_2025 2.txt.xlsx`
+# → payments.cost_center_account (1.049 rows iniciais).
+#
+# Source tem 2 cols apenas. Trivial; sem catchall.
+
+target_entity: CostCenterAccount
+description: Mapping CC ↔ conta_razao (1.049 rows). Apoio para R7 orçamentárias.
+
+source:
+  format: xlsx
+  sheet: "CC + CONTA"
+
+columns:
+  centro_de_custo:
+    source: CENTRO_DE_CUSTO
+    required: true
+  conta_razao:
+    source: CONTA_RAZAO
+    required: true

@@ -1,0 +1,40 @@
+# Projeção do XLSX `ESLL - EXTRAÇÃO Nº DE PACOTES - LPU_VALORES.xlsx` (Sheet1)
+# → payments.service_package (44.7k rows iniciais).
+#
+# Source tem 10 colunas; mapeamos 8 tipadas + raw_extra absorve as restantes.
+# 'Preço bruto' aparece 2x no header — dict-driven mapping pega a última.
+
+target_entity: ServicePackage
+description: ESLL (pacote de serviço SAP) — 10 cols → 8 tipadas + raw_extra
+
+source:
+  format: xlsx
+  sheet: Sheet1
+
+columns:
+  pacote:
+    source: Nº pacote
+    required: true
+  linha:
+    source: Linha
+    type: int
+    required: true
+  numero_servico:
+    source: Nº de serviço
+    required: true
+  texto_breve:
+    source: Texto breve
+  preco_bruto:
+    source: Preço bruto
+    type: decimal
+  qtd_solicitada:
+    source: Qtd.solicitada
+    type: decimal
+  valor_solicitado:
+    source: Valor solicitado
+    type: decimal
+
+catchall:
+  field: raw_extra
+  include_unmapped: true
+  exclude_none: true

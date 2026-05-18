@@ -1,0 +1,89 @@
+# Projeção do XLSX `Analitico_Empreiteiras_WF1_WF2_TOTAL_2025 2.txt.xlsx`
+# sheet "Analitico_Empreiteiras_WF1_WF2_" → payments.wf_payment.
+#
+# 869.663 rows iniciais. Source tem 81 cols; mapeamos 27 tipadas + raw_extra
+# absorve as ~54 opcionais/vestigiais (DEGRAU, ID_CONTRATO_ITEM, STATUS_DEGRAU,
+# ITEM_PARA são 0% populated — vestigiais — vão pro raw_extra).
+#
+# Particionada por data_pedido — REQUIRED.
+
+target_entity: WFPayment
+description: Pagamentos analíticos WF1+WF2 — 869k rows, particionada por trimestre.
+
+source:
+  format: xlsx
+  sheet: Analitico_Empreiteiras_WF1_WF2_
+
+columns:
+  os_num:
+    source: OS
+    required: true
+  sistema:
+    source: SISTEMA
+    type: enum
+    enum: Sistema
+  pedido_num:
+    source: PEDIDO_NUM
+  contrato_num:
+    source: CONTRATO_NUM
+  item_num:
+    source: ITEM_NUM
+  item_descricao:
+    source: ITEM_DESCRICAO
+  material_servico_num:
+    source: MATERIAL_SERVICO_NUM
+  data_pedido:
+    source: DATA_PEDIDO
+    type: date
+    required: true
+  data_execucao:
+    source: DATA_EXECUCAO
+    type: date
+  valor_total_final:
+    source: VALOR_TOTAL_FINAL
+    type: decimal
+  valor_unitario:
+    source: VALOR_UNITARIO
+    type: decimal
+  valor_unitario_para:
+    source: VALOR_UNITARIO_PARA
+    type: decimal
+  categoria:
+    source: CATEGORIA
+  uf:
+    source: UF
+  cidade:
+    source: CIDADE
+  tecnologia:
+    source: TECNOLOGIA
+  atividade:
+    source: ATIVIDADE
+  objeto_do_contrato:
+    source: OBJETO_DO_CONTRATO
+  tipo_de_lpu:
+    source: TIPO_DE_LPU
+  tipo_de_despesa:
+    source: TIPO_DE_DESPESA
+    type: enum
+    enum: TipoDespesa
+  empreiteira:
+    source: EMPREITEIRA
+  fase_atual:
+    source: FASE_ATUAL
+  status_os:
+    source: STATUS_OS
+  nivel_gerencial:
+    source: NIVEL_GERENCIAL
+  malogro:
+    source: MALOGRO
+  mes_medicao:
+    source: MES_MEDICAO
+  regional_soe_nova:
+    source: REGIONAL_SOE_NOVA
+  centro_de_custo:
+    source: CENTRO_DE_CUSTO
+
+catchall:
+  field: raw_extra
+  include_unmapped: true
+  exclude_none: true

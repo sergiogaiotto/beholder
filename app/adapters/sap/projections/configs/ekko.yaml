@@ -1,0 +1,52 @@
+# Projeção do XLSX `EKKO - SAP (Extração pedidos).MHTML.xlsx` (Sheet1)
+# → payments.purchase_order_header (1.894 rows iniciais + 138 do GC sheet).
+#
+# Source tem 179 colunas; mapeamos 12 tipadas + raw_extra absorve as outras 167.
+#
+# Filtros downstream: categoria_doc='K' = guarda-chuva, 'F' = pedido normal.
+
+target_entity: PurchaseOrderHeader
+description: EKKO (cabeçalho de pedido SAP) — 179 cols → 12 tipadas + raw_extra
+
+source:
+  format: xlsx
+  sheet: Sheet1
+
+columns:
+  documento_compras:
+    source: Documento de compras
+    required: true
+  empresa:
+    source: Empresa
+    required: true
+  categoria_doc:
+    source: Ctg.doc.compras
+  tipo_doc:
+    source: Tp.doc.compras
+  fornecedor:
+    source: Fornecedor
+    required: true
+  contrato_basico:
+    source: Contrato básico
+  data_documento:
+    source: Data do documento
+    type: date
+  inicio_validade:
+    source: Início per.validade
+    type: date
+  fim_validade:
+    source: Fim da validade
+    type: date
+  val_fix_cab:
+    source: ValFix.(nível cab.)
+    type: decimal
+  moeda:
+    source: Moeda
+    default: BRL
+  status:
+    source: Status
+
+catchall:
+  field: raw_extra
+  include_unmapped: true
+  exclude_none: true
