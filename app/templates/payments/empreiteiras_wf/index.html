@@ -1,0 +1,306 @@
+{% extends "base.html" %}
+{% block title %}Empreiteiras WF — Beholder{% endblock %}
+
+{#
+  Dashboard Empreiteiras-WF (Fase 3).
+
+  Estado deste arquivo:
+    - Bloco A (atual): layout completo com mock data servida pelo
+      PaymentsDashboardService stub. Charts renderizam Chart.js com os
+      mesmos números do mockup. Botoes de toolbar (Exportar / Modo Claro /
+      Período) ficam visuais e desabilitados.
+    - Blocos B-D: substituem mock por dados reais (mantendo o shape do
+      payload), conectam filtros HTMX e drill-down.
+
+  Estrutura:
+    1. Header vermelho full-bleed (título + resumo exec + toolbar)
+    2. Grid 9 KPIs (3×3) com cards-link drill-down
+    3. Barra de filtros (placeholder no Bloco A, HTMX no D)
+    4. 3 cards de Chart.js (donut, bar stacked, horizontal bar)
+    5. Tabela "Visão por Fornecedor"
+#}
+
+{% block content %}
+<!-- ============================================================ -->
+<!-- 1. Header vermelho full-bleed                                 -->
+<!-- ============================================================ -->
+<div class="bg-brand-700 text-white">
+  <div class="px-6 py-6">
+    <div class="flex items-start justify-between gap-6 flex-wrap">
+      <div class="min-w-0">
+        <h1 class="text-2xl font-semibold tracking-tight">{{ dashboard.header.title }}</h1>
+        <p class="text-sm opacity-80 mt-1">{{ dashboard.header.subtitle }}</p>
+      </div>
+
+      <!-- Resumo Executivo -->
+      <div class="bg-brand-800/40 border border-white/20 rounded-md px-4 py-3 min-w-[220px]">
+        <div class="text-[10px] uppercase tracking-wider opacity-70 mb-1.5">Resumo Executivo</div>
+        <div class="space-y-0.5 text-sm">
+          <div><span class="font-semibold">{{ dashboard.header.resumo_executivo.fornecedores }}</span> <span class="opacity-80">Fornecedores</span></div>
+          <div><span class="font-semibold">{{ dashboard.header.resumo_executivo.contratos_analisados }}</span> <span class="opacity-80">Contratos Analisados</span></div>
+          <div><span class="font-semibold">{{ dashboard.header.resumo_executivo.os_analisadas }}</span> <span class="opacity-80">Ordens de Serviço Analisadas</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toolbar — placeholder no Bloco A (sem comportamento) -->
+    <div class="mt-4 flex items-center gap-2 flex-wrap">
+      <button type="button" disabled
+              class="text-xs px-3 py-1.5 rounded border border-white/30 bg-white/10 opacity-60 cursor-not-allowed inline-flex items-center gap-1.5"
+              title="Em breve">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 4 V14 M7 11 L12 16 L17 11 M5 19 H19" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Exportar Relatório
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M6 9 L12 15 L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button type="button" disabled
+              class="text-xs px-3 py-1.5 rounded border border-white/30 bg-white/10 opacity-60 cursor-not-allowed inline-flex items-center gap-1.5"
+              title="Em breve">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M12 2 V4 M12 20 V22 M2 12 H4 M20 12 H22 M5 5 L6.5 6.5 M17.5 17.5 L19 19 M5 19 L6.5 17.5 M17.5 6.5 L19 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        Modo Claro
+      </button>
+      <button type="button" disabled
+              class="text-xs px-3 py-1.5 rounded border border-white/30 bg-white/10 opacity-60 cursor-not-allowed inline-flex items-center gap-1.5"
+              title="Em breve">
+        Todo o Período
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M6 9 L12 15 L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 2. Grid 9 KPIs (3×3) — cards-link drill-down                  -->
+<!-- ============================================================ -->
+<div class="px-6 py-5 pb-12 max-w-full">
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+    {% for kpi in dashboard.kpis %}
+      <a href="{{ kpi.href }}"
+         class="group bg-white border border-neutral-200 rounded-lg p-4 hover:border-brand-400 hover:shadow-sm transition flex items-start gap-3">
+        <!-- Icon -->
+        <div class="shrink-0 w-10 h-10 rounded-md bg-brand-50 text-brand-700 flex items-center justify-center">
+          {% include "payments/empreiteiras_wf/_icons.html" %}
+        </div>
+        <!-- Body -->
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500 truncate">{{ kpi.label }}</div>
+            <span class="text-neutral-300 group-hover:text-brand-600 shrink-0">›</span>
+          </div>
+          <div class="text-2xl font-semibold mt-0.5 text-neutral-800 truncate">{{ kpi.value }}</div>
+          <div class="text-[11px] text-neutral-500 mt-0.5 truncate">{{ kpi.hint }}</div>
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- 3. Barra de filtros — HTMX (Bloco D)                          -->
+  <!-- ============================================================ -->
+  {#
+    Filtros operam apenas na tabela "Visão por Fornecedor". KPIs e charts
+    refletem sempre o panorama global. HTMX faz GET no endpoint partial e
+    substitui apenas o tbody — sem full reload nem flicker.
+  #}
+  <form id="filtros-fornecedores"
+        hx-get="/payments/empreiteiras-wf/fornecedores"
+        hx-trigger="input changed delay:300ms from:input, change from:select, refresh"
+        hx-target="#fornecedores-tbody"
+        hx-swap="outerHTML"
+        hx-include="this"
+        class="bg-white border border-neutral-200 rounded-lg p-3 mb-4 flex items-end gap-3 flex-wrap">
+    <div class="flex-1 min-w-[200px]">
+      <label for="filter-search" class="text-[10px] uppercase tracking-wider text-neutral-500">
+        Buscar Fornecedor/OS
+      </label>
+      <input id="filter-search" name="search" type="text"
+             value="{{ dashboard.active_filters.search }}"
+             placeholder="Digite nome, OS ou contrato…"
+             class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600" />
+    </div>
+    <div class="min-w-[160px]">
+      <label for="filter-tipo" class="text-[10px] uppercase tracking-wider text-neutral-500">
+        Tipo de Alerta
+      </label>
+      <select id="filter-tipo" name="tipo"
+              class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600">
+        <option value="">Todos</option>
+        {% for t in dashboard.filtros.tipos_alerta %}
+          <option value="{{ t }}" {% if dashboard.active_filters.tipo == t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="min-w-[160px]">
+      <label for="filter-uf" class="text-[10px] uppercase tracking-wider text-neutral-500">
+        Estado
+      </label>
+      <select id="filter-uf" name="uf"
+              class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600">
+        <option value="">Todos</option>
+        {% for uf in dashboard.filtros.ufs %}
+          <option value="{{ uf }}" {% if dashboard.active_filters.uf == uf %}selected{% endif %}>{{ uf }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="button"
+            onclick="
+              this.form.search.value=''; this.form.tipo.value=''; this.form.uf.value='';
+              htmx.trigger(this.form, 'refresh');
+            "
+            class="px-4 py-2 rounded bg-brand-600 text-white text-sm hover:bg-brand-700 inline-flex items-center gap-1.5">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 12 A9 9 0 1 0 6 6 L3 9 M3 3 V9 H9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Limpar
+    </button>
+  </form>
+
+  <!-- ============================================================ -->
+  <!-- 4. Três cards de Chart.js                                     -->
+  <!-- ============================================================ -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-6">
+    <!-- Donut: Alertas por Tipo -->
+    <section class="bg-white border border-neutral-200 rounded-lg p-4">
+      <header class="mb-3">
+        <h2 class="text-sm font-medium flex items-center gap-1.5">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 4 A8 8 0 1 0 20 12 H12 Z" stroke="currentColor" stroke-width="1.5" fill="currentColor" fill-opacity="0.15"/></svg>
+          Alertas por Tipo
+        </h2>
+      </header>
+      <div class="relative h-56"><canvas id="chartAlertasTipo"></canvas></div>
+      <div class="text-[10px] text-neutral-400 mt-2 text-center">⤷ Clique para filtrar</div>
+    </section>
+
+    <!-- Bar stacked: Top Fornecedores por Alertas -->
+    <section class="bg-white border border-neutral-200 rounded-lg p-4">
+      <header class="mb-3">
+        <h2 class="text-sm font-medium flex items-center gap-1.5">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 20 V10 M10 20 V4 M16 20 V13 M22 20 V8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          Top Fornecedores por Alertas
+        </h2>
+      </header>
+      <div class="relative h-56"><canvas id="chartTopFornecedores"></canvas></div>
+      <div class="text-[10px] text-neutral-400 mt-2 text-center">⤷ Clique para detalhar</div>
+    </section>
+
+    <!-- Horizontal bar: Risco Financeiro por Fornecedor -->
+    <section class="bg-white border border-neutral-200 rounded-lg p-4">
+      <header class="mb-3">
+        <h2 class="text-sm font-medium flex items-center gap-1.5">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 6 H14 M4 12 H20 M4 18 H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          Risco Financeiro por Fornecedor
+        </h2>
+      </header>
+      <div class="relative h-56"><canvas id="chartRiscoFinanceiro"></canvas></div>
+      <div class="text-[10px] text-neutral-400 mt-2 text-center">⤷ Valor em risco por fornecedor</div>
+    </section>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- 5. Tabela "Visão por Fornecedor"                              -->
+  <!-- ============================================================ -->
+  <section class="bg-white border border-neutral-200 rounded-lg p-4">
+    <header class="mb-3">
+      <h2 class="text-sm font-medium flex items-center gap-1.5">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 4 H20 V20 H4 Z M4 9 H20 M4 14 H20 M9 4 V20 M15 4 V20" stroke="currentColor" stroke-width="1.4"/></svg>
+        Visão por Fornecedor
+      </h2>
+    </header>
+    <table class="w-full text-sm">
+      <thead class="text-[11px] uppercase tracking-wider text-neutral-500 bg-neutral-50">
+        <tr>
+          <th class="text-left py-2 px-3 font-medium">Fornecedor</th>
+          <th class="text-left py-2 px-3 font-medium">CNPJ</th>
+          <th class="text-left py-2 px-3 font-medium">Região</th>
+        </tr>
+      </thead>
+      {% with fornecedores = dashboard.fornecedores %}
+        {% include "payments/empreiteiras_wf/_fornecedores_table.html" %}
+      {% endwith %}
+    </table>
+  </section>
+
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+// Charts (Bloco A: dados mock idênticos ao service stub; Bloco C
+// substitui por dados reais e adiciona interatividade onClick).
+(function () {
+  const charts = {{ dashboard.charts | tojson }};
+
+  // -------- Donut: Alertas por Tipo --------
+  new Chart(document.getElementById('chartAlertasTipo'), {
+    type: 'doughnut',
+    data: {
+      labels: charts.alertas_por_tipo.labels,
+      datasets: [{
+        data: charts.alertas_por_tipo.data,
+        backgroundColor: charts.alertas_por_tipo.colors,
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '60%',
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 10 } },
+      },
+    },
+  });
+
+  // -------- Bar stacked: Top Fornecedores por Alertas --------
+  new Chart(document.getElementById('chartTopFornecedores'), {
+    type: 'bar',
+    data: {
+      labels: charts.top_fornecedores.labels,
+      datasets: charts.top_fornecedores.series.map(s => ({
+        label: s.name,
+        data: s.data,
+        backgroundColor: s.color,
+        borderWidth: 0,
+      })),
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true, ticks: { font: { size: 9 }, maxRotation: 35, minRotation: 35 } },
+        y: { stacked: true, ticks: { font: { size: 9 } } },
+      },
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 10 } },
+      },
+    },
+  });
+
+  // -------- Horizontal bar: Risco Financeiro --------
+  new Chart(document.getElementById('chartRiscoFinanceiro'), {
+    type: 'bar',
+    data: {
+      labels: charts.risco_financeiro.labels,
+      datasets: [{
+        data: charts.risco_financeiro.data,
+        backgroundColor: charts.risco_financeiro.colors,
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: {
+          ticks: {
+            font: { size: 9 },
+            callback: (v) => 'R$ ' + (v >= 1000 ? (v/1000).toFixed(0) + 'k' : v.toFixed(0)),
+          },
+        },
+        y: { ticks: { font: { size: 9 } } },
+      },
+      plugins: { legend: { display: false } },
+    },
+  });
+})();
+</script>
+{% endblock %}

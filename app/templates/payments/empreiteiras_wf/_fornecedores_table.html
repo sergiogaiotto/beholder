@@ -1,0 +1,26 @@
+{#
+  Partial da tabela "Visão por Fornecedor". Renderizado em duas situações:
+
+    1. Inline no `index.html` (dentro do <table>), durante o full reload
+       da página — recebe `fornecedores` via dashboard.fornecedores.
+    2. Como resposta HTMX da rota /payments/empreiteiras-wf/fornecedores
+       quando o usuário altera filtros — substitui o tbody via hx-target.
+
+  Mantém o mesmo shape de markup em ambos os caminhos para que o usuário
+  não veja o layout pular ao filtrar.
+#}
+<tbody id="fornecedores-tbody">
+  {% for f in fornecedores %}
+    <tr class="border-t border-neutral-100 hover:bg-neutral-50/50">
+      <td class="py-2.5 px-3 font-medium">{{ f.nome }}</td>
+      <td class="py-2.5 px-3 font-mono text-xs text-neutral-600">{{ f.cnpj }}</td>
+      <td class="py-2.5 px-3 text-neutral-600">{{ f.regiao }}</td>
+    </tr>
+  {% else %}
+    <tr>
+      <td colspan="3" class="text-center py-6 text-neutral-400 italic">
+        nenhum fornecedor monitorado com esses filtros
+      </td>
+    </tr>
+  {% endfor %}
+</tbody>

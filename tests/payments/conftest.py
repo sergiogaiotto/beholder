@@ -7,6 +7,11 @@ por migrations parciais durante debug) persistem e podem mascarar bugs.
 O conftest pai (`tests/conftest.py`) isola o schema `public` num schema
 ephemeral, mas tabelas em `payments.*` são qualificadas e ficam no schema
 fixo `payments` — independente da isolação do public. Aqui resolvemos isso.
+
+Fase 3 add (Bloco B): fixture function-scope `_reset_payments_data_per_test`
+que TRUNCA as tabelas transacionais (não catálogos) entre tests. Os tests
+de subdir `tests/payments/repositories/` já tinham fixture análoga; agora
+fica disponível também para os tests da raiz do pacote.
 """
 
 from __future__ import annotations
@@ -15,6 +20,8 @@ import os
 
 import asyncpg
 import pytest
+
+from app.adapters.db.postgres_payments import connect_payments
 
 
 _DEFAULT_TEST_DSN = "postgresql://beholder:beholder@127.0.0.1:5432/beholder_test"
@@ -44,3 +51,51 @@ def _reset_payments_schema(event_loop):
     event_loop.run_until_complete(_drop())
     yield
     event_loop.run_until_complete(_drop())
+
+
+@pytest.fixture(autouse=True)
+async def _reset_payments_data_per_test():
+    """TRUNCATE das tabelas transacionais entre tests da raiz tests/payments/.
+
+    Preserva o seed da migration 007 (20 rule_definition + 11 analytic_detector)
+    porque o catálogo é imutável dentro de uma sessão — só limpa o que os tests
+    criam (suppliers, contratos, payments, runs, findings).
+
+    No-op enquanto o schema ainda não foi aplicado pelo primeiro test (raise
+    UndefinedTable é capturado).
+    """
+    try:
+        async with connect_payments() as c:
+            await c.execute(
+                """
+                TRUNCATE
+                    payments.reconciliation_finding,
+                    payments.analytic_finding,
+                    payments.reconciliation_run,
+                    payments.extraction_job,
+                    payments.contract_clause,
+                    payments.lpu_item,
+                    payments.contract_version,
+                    payments.contract_master,
+                    payments.supplier_bridge,
+                    payments.purchase_order_item,
+                    payments.purchase_order_header,
+                    payments.service_package,
+                    payments.purchase_order_gc,
+                    payments.cost_center_account,
+                    payments.wf_payment,
+                    payments.ingestion_run
+                RESTART IDENTITY CASCADE
+                """
+            )
+            # Limpa rules/detectors inventados por tests; preserva o seed real.
+            await c.execute(
+                "DELETE FROM payments.rule_definition WHERE code LIKE 'REGRA_TEST%'"
+            )
+            await c.execute(
+                "DELETE FROM payments.analytic_detector WHERE code LIKE 'R7_TEST%'"
+            )
+    except (asyncpg.exceptions.UndefinedTableError, asyncpg.exceptions.InvalidSchemaNameError):
+        # Schema ainda não criado pelo primeiro test desse arquivo — no-op.
+        pass
+    yield

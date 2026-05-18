@@ -526,6 +526,180 @@ async def skills_page(
     )
 
 
+# ---------- Pagamentos → Empreiteiras WF (Fase 3) ----------
+
+@router.get("/payments/empreiteiras-wf", response_class=HTMLResponse)
+async def payments_empreiteiras_wf_page(
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+    search: str | None = None,
+    uf: str | None = None,
+    tipo: str | None = None,
+):
+    """Dashboard de Monitoramento de Pagamentos para Empreiteiras-WF.
+
+    Acesso: root/admin/supervisor/controladoria. A role `controladoria` é
+    nova (Fase 3) — o gate aceita strings livres, não exige migration de
+    enum. Outras roles tomam 403 via `_require_any_role`.
+
+    Query params filtram apenas a tabela "Visão por Fornecedor"; KPIs e
+    charts mostram sempre o panorama global. Estados ficam refletidos nos
+    inputs via `dashboard.active_filters` (state-aware UI).
+    """
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.dashboard_service import PaymentsDashboardService
+
+    svc = PaymentsDashboardService()
+    dashboard = await svc.dashboard_payload(search=search, uf=uf, tipo=tipo)
+
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/index.html",
+        await _ctx(
+            request, user,
+            active_module="empreiteiras_wf",
+            dashboard=dashboard,
+        ),
+    )
+
+
+@router.get("/payments/empreiteiras-wf/alertas", response_class=HTMLResponse)
+async def payments_empreiteiras_wf_alertas_page(
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+    severity: str | None = None,
+    rule_code: str | None = None,
+    status: str | None = None,
+    search: str | None = None,
+    page: int = 1,
+):
+    """Inbox /alertas — lista paginada de findings com filtros.
+
+    Mesma matriz de acesso do dashboard. Severity aceita 'high'/'medium'/'low';
+    UI passa o label visível (ex.: 'Alerta Op.') que o service converte
+    antes de chamar o repo.
+    """
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.dashboard_service import PaymentsDashboardService
+
+    svc = PaymentsDashboardService()
+    # severity da UI vem como label — converte aqui.
+    sev_map = dict(svc.TIPOS_ALERTA)
+    severity_internal = sev_map.get(severity, severity if severity else None)
+
+    inbox = await svc.inbox_payload(
+        severity=severity_internal,
+        rule_code=rule_code or None,
+        status=status or None,
+        search=search or None,
+        page=max(1, page),
+    )
+
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/alertas.html",
+        await _ctx(
+            request, user,
+            active_module="empreiteiras_wf",
+            inbox=inbox,
+            # Reverse map p/ exibir o label nos selects sem extra Jinja logic.
+            severity_label_active=severity or "",
+        ),
+    )
+
+
+@router.get("/payments/empreiteiras-wf/alertas/{finding_id}", response_class=HTMLResponse)
+async def payments_empreiteiras_wf_alerta_detalhe(
+    finding_id: str,
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+):
+    """Detalhe de 1 finding: contexto (regra/contrato/OS) e ações (workflow)."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.dashboard_service import PaymentsDashboardService
+
+    svc = PaymentsDashboardService()
+    finding = await svc.finding_detail(finding_id)
+    if finding is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "alerta não encontrado")
+
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/alerta_detalhe.html",
+        await _ctx(
+            request, user,
+            active_module="empreiteiras_wf",
+            finding=finding,
+        ),
+    )
+
+
+@router.post("/payments/empreiteiras-wf/alertas/{finding_id}/decide")
+async def payments_empreiteiras_wf_alerta_decide(
+    finding_id: str,
+    request: Request,
+    new_status: str = Form(...),
+    decision_reason: str = Form(""),
+    user: User | None = Depends(current_user_optional),
+):
+    """Aplica transição de status no finding (HITL workflow).
+
+    Form-encoded para que `<form method=POST>` funcione sem JS extra.
+    Após decidir, redireciona pro próprio detalhe (PRG pattern — evita
+    repost no F5)."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.dashboard_service import PaymentsDashboardService
+
+    svc = PaymentsDashboardService()
+    ok, error = await svc.transition_finding(
+        finding_id,
+        new_status=new_status,
+        decision_reason=(decision_reason.strip() or None),
+        decided_by_user_id=str(user.id),
+    )
+    if not ok:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, error or "falha na transição")
+    return RedirectResponse(
+        f"/payments/empreiteiras-wf/alertas/{finding_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get("/payments/empreiteiras-wf/fornecedores", response_class=HTMLResponse)
+async def payments_empreiteiras_wf_fornecedores_partial(
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+    search: str | None = None,
+    uf: str | None = None,
+    tipo: str | None = None,
+):
+    """Partial HTMX da tabela 'Visão por Fornecedor'. Retorna SÓ o HTML
+    da tabela para target=#fornecedores-table no dashboard. Não recarrega
+    KPIs/charts."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.dashboard_service import PaymentsDashboardService
+
+    svc = PaymentsDashboardService()
+    fornecedores = await svc.fornecedores(search=search, uf=uf, tipo=tipo)
+
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/_fornecedores_table.html",
+        {"request": request, "fornecedores": fornecedores},
+    )
+
+
 # ---------- Building Blocks (catálogo) ----------
 
 @router.get("/blocks", response_class=HTMLResponse)
