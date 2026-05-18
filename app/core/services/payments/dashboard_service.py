@@ -349,35 +349,83 @@ class PaymentsDashboardService:
             },
         }
 
-    # =========================================================== Mock buckets
+    # =========================================================== Tabela + filtros (Bloco D)
 
-    async def fornecedores(self) -> list[dict[str, str]]:
-        """[Mock no Bloco B; Bloco D substitui por query real.]"""
-        return [
-            {"nome": "ENGEMAN MNT", "cnpj": "01731483000167", "regiao": "RJ/ES, SP"},
-            {"nome": "EQS ENGENHARIA", "cnpj": "80464753000197", "regiao": "RS, NE, CONO"},
-            {"nome": "FFA INFRAESTRUTURA", "cnpj": "08375450000170", "regiao": "MG, RJ/ES"},
-            {"nome": "WG PEREIRA", "cnpj": "14113561000101", "regiao": "SP"},
-            {"nome": "ABILITY TECNOLOGIA", "cnpj": "06127582000158", "regiao": "SP"},
-        ]
+    # Tipos de alerta exibidos no select de filtro do dashboard, mapeados
+    # para o campo severity dos findings. Ordem do mockup.
+    TIPOS_ALERTA = (
+        ("Alerta Op.", "high"),
+        ("Alerta Proc.", "medium"),
+        ("St. Atípica", "low"),
+    )
+
+    async def fornecedores(
+        self,
+        *,
+        search: str | None = None,
+        uf: str | None = None,
+        tipo: str | None = None,
+    ) -> list[dict[str, str]]:
+        """Tabela 'Visão por Fornecedor' com filtros opcionais.
+
+        `tipo` aceita o label visível ('Alerta Op.', 'Alerta Proc.',
+        'St. Atípica') e o service converte para severity ('high'/medium'/'low')
+        antes de chamar o repo.
+        """
+        severity = None
+        if tipo:
+            sev_map = dict(self.TIPOS_ALERTA)
+            severity = sev_map.get(tipo)  # None se label desconhecido → no-op
+        return await self.repo.list_fornecedores(
+            search=(search or None),
+            uf=(uf or None),
+            severity=severity,
+        )
+
+    async def filtros_disponiveis(self) -> dict[str, list[Any]]:
+        """Catálogo para popular os dropdowns da barra de filtros do
+        dashboard: UFs presentes em wf_payment + tipos de alerta fixos.
+        """
+        ufs = await self.repo.list_ufs_disponiveis()
+        return {
+            "ufs": ufs,
+            "tipos_alerta": [label for label, _sev in self.TIPOS_ALERTA],
+        }
 
     # ========================================================== Aggregator
 
-    async def dashboard_payload(self) -> dict[str, Any]:
-        """Dispara KPIs + Charts em paralelo (10 queries total) e monta o
-        dict completo consumido pelo template. Tabela de fornecedores ainda
-        é mock — vira query real no Bloco D.
+    async def dashboard_payload(
+        self,
+        *,
+        search: str | None = None,
+        uf: str | None = None,
+        tipo: str | None = None,
+    ) -> dict[str, Any]:
+        """Dispara KPIs + Charts + filtros + tabela em paralelo (12 queries
+        total) e monta o dict completo consumido pelo template.
+
+        Filtros (`search`/`uf`/`tipo`) afetam apenas a tabela 'Visão por
+        Fornecedor' — KPIs e charts mostram sempre o panorama completo.
+        Mudar isso ficaria stretch goal (cada KPI vira filterable).
 
         Pool dedicado payments tem max=20 (vide memory/payments_pool_quirks.md);
-        10 conexões simultâneas estão dentro do orçamento (sobra para outras
+        12 conexões simultâneas estão dentro do orçamento (sobra para outras
         sessões http concorrentes)."""
-        kpi_buckets, chart_buckets = await asyncio.gather(
+        kpi_buckets, chart_buckets, fornecedores, filtros = await asyncio.gather(
             self._fetch_kpi_buckets(),
             self._fetch_chart_buckets(),
+            self.fornecedores(search=search, uf=uf, tipo=tipo),
+            self.filtros_disponiveis(),
         )
         return {
             "header": await self.header_payload(kpi_buckets),
             "kpis": await self.kpis(kpi_buckets),
             "charts": await self.charts(chart_buckets),
-            "fornecedores": await self.fornecedores(),
+            "fornecedores": fornecedores,
+            "filtros": filtros,
+            "active_filters": {
+                "search": search or "",
+                "uf": uf or "",
+                "tipo": tipo or "",
+            },
         }

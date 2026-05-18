@@ -532,6 +532,9 @@ async def skills_page(
 async def payments_empreiteiras_wf_page(
     request: Request,
     user: User | None = Depends(current_user_optional),
+    search: str | None = None,
+    uf: str | None = None,
+    tipo: str | None = None,
 ):
     """Dashboard de Monitoramento de Pagamentos para Empreiteiras-WF.
 
@@ -539,8 +542,9 @@ async def payments_empreiteiras_wf_page(
     nova (Fase 3) — o gate aceita strings livres, não exige migration de
     enum. Outras roles tomam 403 via `_require_any_role`.
 
-    Bloco A: payload servido por `PaymentsDashboardService` stub (mock
-    data). Blocos B-D substituem por queries reais sem mexer no template.
+    Query params filtram apenas a tabela "Visão por Fornecedor"; KPIs e
+    charts mostram sempre o panorama global. Estados ficam refletidos nos
+    inputs via `dashboard.active_filters` (state-aware UI).
     """
     if not user:
         return RedirectResponse("/login")
@@ -549,7 +553,7 @@ async def payments_empreiteiras_wf_page(
     from app.core.services.payments.dashboard_service import PaymentsDashboardService
 
     svc = PaymentsDashboardService()
-    dashboard = await svc.dashboard_payload()
+    dashboard = await svc.dashboard_payload(search=search, uf=uf, tipo=tipo)
 
     return templates.TemplateResponse(
         "payments/empreiteiras_wf/index.html",
@@ -558,6 +562,32 @@ async def payments_empreiteiras_wf_page(
             active_module="empreiteiras_wf",
             dashboard=dashboard,
         ),
+    )
+
+
+@router.get("/payments/empreiteiras-wf/fornecedores", response_class=HTMLResponse)
+async def payments_empreiteiras_wf_fornecedores_partial(
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+    search: str | None = None,
+    uf: str | None = None,
+    tipo: str | None = None,
+):
+    """Partial HTMX da tabela 'Visão por Fornecedor'. Retorna SÓ o HTML
+    da tabela para target=#fornecedores-table no dashboard. Não recarrega
+    KPIs/charts."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.dashboard_service import PaymentsDashboardService
+
+    svc = PaymentsDashboardService()
+    fornecedores = await svc.fornecedores(search=search, uf=uf, tipo=tipo)
+
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/_fornecedores_table.html",
+        {"request": request, "fornecedores": fornecedores},
     )
 
 

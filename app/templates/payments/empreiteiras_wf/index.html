@@ -94,33 +94,63 @@
   </div>
 
   <!-- ============================================================ -->
-  <!-- 3. Barra de filtros — placeholder no Bloco A                  -->
+  <!-- 3. Barra de filtros — HTMX (Bloco D)                          -->
   <!-- ============================================================ -->
-  <div class="bg-white border border-neutral-200 rounded-lg p-3 mb-4 flex items-end gap-3 flex-wrap">
+  {#
+    Filtros operam apenas na tabela "Visão por Fornecedor". KPIs e charts
+    refletem sempre o panorama global. HTMX faz GET no endpoint partial e
+    substitui apenas o tbody — sem full reload nem flicker.
+  #}
+  <form id="filtros-fornecedores"
+        hx-get="/payments/empreiteiras-wf/fornecedores"
+        hx-trigger="input changed delay:300ms from:input, change from:select, refresh"
+        hx-target="#fornecedores-tbody"
+        hx-swap="outerHTML"
+        hx-include="this"
+        class="bg-white border border-neutral-200 rounded-lg p-3 mb-4 flex items-end gap-3 flex-wrap">
     <div class="flex-1 min-w-[200px]">
-      <label class="text-[10px] uppercase tracking-wider text-neutral-500">Buscar Fornecedor/OS</label>
-      <input type="text" disabled placeholder="Digite nome, OS ou contrato…"
-             class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600 disabled:bg-neutral-50 disabled:text-neutral-400" />
+      <label for="filter-search" class="text-[10px] uppercase tracking-wider text-neutral-500">
+        Buscar Fornecedor/OS
+      </label>
+      <input id="filter-search" name="search" type="text"
+             value="{{ dashboard.active_filters.search }}"
+             placeholder="Digite nome, OS ou contrato…"
+             class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600" />
     </div>
     <div class="min-w-[160px]">
-      <label class="text-[10px] uppercase tracking-wider text-neutral-500">Tipo de Alerta</label>
-      <select disabled class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none disabled:bg-neutral-50 disabled:text-neutral-400">
-        <option>Todos</option>
+      <label for="filter-tipo" class="text-[10px] uppercase tracking-wider text-neutral-500">
+        Tipo de Alerta
+      </label>
+      <select id="filter-tipo" name="tipo"
+              class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600">
+        <option value="">Todos</option>
+        {% for t in dashboard.filtros.tipos_alerta %}
+          <option value="{{ t }}" {% if dashboard.active_filters.tipo == t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
       </select>
     </div>
     <div class="min-w-[160px]">
-      <label class="text-[10px] uppercase tracking-wider text-neutral-500">Estado</label>
-      <select disabled class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none disabled:bg-neutral-50 disabled:text-neutral-400">
-        <option>Todos</option>
+      <label for="filter-uf" class="text-[10px] uppercase tracking-wider text-neutral-500">
+        Estado
+      </label>
+      <select id="filter-uf" name="uf"
+              class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600">
+        <option value="">Todos</option>
+        {% for uf in dashboard.filtros.ufs %}
+          <option value="{{ uf }}" {% if dashboard.active_filters.uf == uf %}selected{% endif %}>{{ uf }}</option>
+        {% endfor %}
       </select>
     </div>
-    <button type="button" disabled
-            class="px-4 py-2 rounded bg-brand-600 text-white text-sm opacity-60 cursor-not-allowed inline-flex items-center gap-1.5"
-            title="Em breve">
+    <button type="button"
+            onclick="
+              this.form.search.value=''; this.form.tipo.value=''; this.form.uf.value='';
+              htmx.trigger(this.form, 'refresh');
+            "
+            class="px-4 py-2 rounded bg-brand-600 text-white text-sm hover:bg-brand-700 inline-flex items-center gap-1.5">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 12 A9 9 0 1 0 6 6 L3 9 M3 3 V9 H9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       Limpar
     </button>
-  </div>
+  </form>
 
   <!-- ============================================================ -->
   <!-- 4. Três cards de Chart.js                                     -->
@@ -181,17 +211,9 @@
           <th class="text-left py-2 px-3 font-medium">Região</th>
         </tr>
       </thead>
-      <tbody>
-        {% for f in dashboard.fornecedores %}
-          <tr class="border-t border-neutral-100 hover:bg-neutral-50/50">
-            <td class="py-2.5 px-3 font-medium">{{ f.nome }}</td>
-            <td class="py-2.5 px-3 font-mono text-xs text-neutral-600">{{ f.cnpj }}</td>
-            <td class="py-2.5 px-3 text-neutral-600">{{ f.regiao }}</td>
-          </tr>
-        {% else %}
-          <tr><td colspan="3" class="text-center py-6 text-neutral-400 italic">sem fornecedores monitorados</td></tr>
-        {% endfor %}
-      </tbody>
+      {% with fornecedores = dashboard.fornecedores %}
+        {% include "payments/empreiteiras_wf/_fornecedores_table.html" %}
+      {% endwith %}
     </table>
   </section>
 

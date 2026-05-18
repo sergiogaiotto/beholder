@@ -86,7 +86,9 @@ async def _ensure_payments_schema():
 async def test_dashboard_payload_has_expected_top_level_keys(_ensure_payments_schema):
     svc = PaymentsDashboardService()
     payload = await svc.dashboard_payload()
-    assert set(payload.keys()) == {"header", "kpis", "charts", "fornecedores"}
+    assert set(payload.keys()) == {
+        "header", "kpis", "charts", "fornecedores", "filtros", "active_filters",
+    }
 
 
 @pytest.mark.asyncio
@@ -183,6 +185,54 @@ async def test_charts_with_seed_data():
 
 
 @pytest.mark.asyncio
+async def test_fornecedores_table_after_seed():
+    """Sem filtros: tabela mostra os 2 fornecedores monitorados (3o não
+    monitorado é excluído)."""
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    fornecedores = await svc.fornecedores()
+    nomes = {f["nome"] for f in fornecedores}
+    assert nomes == {"ENGEMAN MNT", "EQS ENGENHARIA"}
+    # CNPJs do seed.
+    by_nome = {f["nome"]: f for f in fornecedores}
+    assert by_nome["ENGEMAN MNT"]["cnpj"] == "01731483000167"
+    assert by_nome["EQS ENGENHARIA"]["cnpj"] == "80464753000197"
+
+
+@pytest.mark.asyncio
+async def test_fornecedores_filter_by_search():
+    """`search` aplica ILIKE em empreiteira ou CNPJ."""
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    # ENGEMAN MNT só
+    rows = await svc.fornecedores(search="ENGEMAN")
+    assert [r["nome"] for r in rows] == ["ENGEMAN MNT"]
+    # Por CNPJ parcial
+    rows = await svc.fornecedores(search="80464")
+    assert [r["nome"] for r in rows] == ["EQS ENGENHARIA"]
+    # Vazio
+    rows = await svc.fornecedores(search="XYZ_INEXISTENTE")
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_fornecedores_filter_by_tipo_maps_to_severity():
+    """Filtro tipo='Alerta Op.' (label) → severity='high' no repo.
+
+    Seed cria 1 finding high (ENGEMAN) e 1 medium (EQS).
+    """
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    op = await svc.fornecedores(tipo="Alerta Op.")
+    assert [r["nome"] for r in op] == ["ENGEMAN MNT"]
+    proc = await svc.fornecedores(tipo="Alerta Proc.")
+    assert [r["nome"] for r in proc] == ["EQS ENGENHARIA"]
+    # Label não mapeado vira no-op (devolve todos).
+    invalido = await svc.fornecedores(tipo="Inexistente")
+    assert len(invalido) == 2
+
+
+@pytest.mark.asyncio
 async def test_chart_top_fornecedores_respects_limit():
     """`chart_top_fornecedores(limit=N)` corta no N. Seed cria só 2 → limite=5
     devolve 2; limite=1 devolve só o mais arriscado."""
@@ -200,16 +250,19 @@ async def test_chart_top_fornecedores_respects_limit():
 
 
 @pytest.mark.asyncio
-async def test_fornecedores_match_mockup_still_mock(_ensure_payments_schema):
+async def test_fornecedores_empty_db_returns_empty_list(_ensure_payments_schema):
+    """DB vazio: tabela sem linhas (não mais mock após Bloco D)."""
     svc = PaymentsDashboardService()
     fornecedores = await svc.fornecedores()
-    assert len(fornecedores) == 5
-    # Tabela ainda é mock no Bloco B (Bloco D conecta DB).
-    nomes = {f["nome"] for f in fornecedores}
-    assert nomes == {
-        "ENGEMAN MNT", "EQS ENGENHARIA", "FFA INFRAESTRUTURA",
-        "WG PEREIRA", "ABILITY TECNOLOGIA",
-    }
+    assert fornecedores == []
+
+
+@pytest.mark.asyncio
+async def test_filtros_disponiveis_with_empty_db(_ensure_payments_schema):
+    svc = PaymentsDashboardService()
+    filtros = await svc.filtros_disponiveis()
+    assert filtros["tipos_alerta"] == ["Alerta Op.", "Alerta Proc.", "St. Atípica"]
+    assert filtros["ufs"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -485,3 +538,68 @@ async def test_root_bypasses_role_gate():
         await _login_as(client, "root_user", "senha-teste-123")
         resp = await client.get("/payments/empreiteiras-wf")
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_fornecedores_partial_route_renders_only_tbody():
+    """A rota HTMX /fornecedores devolve só o partial — sem header, sem
+    KPIs, sem charts. Inicia com tbody#fornecedores-tbody."""
+    from app.main import app
+
+    await _seed_minimal_dataset()
+    await _create_user("ctrl2", "senha-teste-123", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ctrl2", "senha-teste-123")
+        resp = await client.get("/payments/empreiteiras-wf/fornecedores")
+    assert resp.status_code == 200
+    body = resp.text
+    # Partial só renderiza o tbody — nada do shell completo.
+    assert "<tbody id=\"fornecedores-tbody\">" in body
+    assert "ENGEMAN MNT" in body
+    assert "EQS ENGENHARIA" in body
+    # Não tem header vermelho nem KPIs.
+    assert "CONTRATOS MONITORADOS" not in body
+    assert "Monitoramento de Pagamentos" not in body
+
+
+@pytest.mark.asyncio
+async def test_fornecedores_partial_route_applies_filters():
+    """Filtros query-string passam pro service via partial."""
+    from app.main import app
+
+    await _seed_minimal_dataset()
+    await _create_user("ctrl3", "senha-teste-123", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ctrl3", "senha-teste-123")
+        resp = await client.get(
+            "/payments/empreiteiras-wf/fornecedores",
+            params={"search": "ENGEMAN"},
+        )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "ENGEMAN MNT" in body
+    assert "EQS ENGENHARIA" not in body
+
+
+@pytest.mark.asyncio
+async def test_dashboard_page_carries_active_filters_into_inputs():
+    """Filtros aplicados na URL aparecem como `value` no form (state-aware)."""
+    from app.main import app
+
+    await _seed_minimal_dataset()
+    await _create_user("ctrl4", "senha-teste-123", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ctrl4", "senha-teste-123")
+        resp = await client.get(
+            "/payments/empreiteiras-wf",
+            params={"search": "EQS", "tipo": "Alerta Proc."},
+        )
+    assert resp.status_code == 200
+    body = resp.text
+    # Input search renderiza value="EQS".
+    assert 'value="EQS"' in body
+    # Tipo aparece selected.
+    assert '<option value="Alerta Proc." selected>' in body

@@ -266,6 +266,94 @@ class PaymentsDashboardRepository:
             for r in rows
         ]
 
+    # ========================================================== Tabela + filtros (Bloco D)
+
+    async def list_fornecedores(
+        self,
+        *,
+        search: str | None = None,
+        uf: str | None = None,
+        severity: str | None = None,
+    ) -> list[dict[str, str]]:
+        """Tabela 'Visão por Fornecedor' (linhas únicas por empreiteira).
+
+        Mostra apenas empreiteiras com contract_master.is_monitored = TRUE.
+        Região é concatenação alfabética das UFs distintas que aparecem
+        em wf_payment desse fornecedor (ou '—' se sem pagamentos).
+
+        Filtros (todos opcionais e combináveis):
+          - search: ILIKE em empreiteira ou cnpj
+          - uf: empreiteira tem ao menos 1 wf_payment com essa UF
+          - severity: empreiteira tem ao menos 1 finding aberto dessa
+            severity (mapeamento severity↔tipo é feito no service)
+        """
+        where = ["cm.is_monitored"]
+        params: list[Any] = []
+        if search:
+            params.append(f"%{search}%")
+            params.append(f"%{search}%")
+            i1 = len(params) - 1
+            i2 = len(params)
+            where.append(f"(sb.empreiteira ILIKE ${i1} OR sb.cnpj ILIKE ${i2})")
+        if uf:
+            params.append(uf)
+            i = len(params)
+            where.append(
+                f"EXISTS (SELECT 1 FROM payments.wf_payment wf "
+                f"WHERE wf.empreiteira = sb.empreiteira AND wf.uf = ${i})"
+            )
+        if severity:
+            params.append(severity)
+            params.extend(list(_OPEN_STATUSES))
+            i_sev = len(params) - len(_OPEN_STATUSES)
+            i_st = len(params) - len(_OPEN_STATUSES) + 1
+            # status = ANY($i_st..) — usa array literal
+            where.append(
+                f"EXISTS (SELECT 1 FROM payments.reconciliation_finding rf "
+                f"WHERE rf.supplier_id = sb.id "
+                f"  AND rf.severity = ${i_sev} "
+                f"  AND rf.status = ANY(ARRAY["
+                + ", ".join(f"${i_st + k}" for k in range(len(_OPEN_STATUSES)))
+                + "]::text[]))"
+            )
+
+        where_clause = " AND ".join(where)
+        sql = f"""
+            SELECT DISTINCT
+                sb.empreiteira AS nome,
+                sb.cnpj,
+                COALESCE(
+                    (SELECT STRING_AGG(DISTINCT wf.uf, ', ' ORDER BY wf.uf)
+                     FROM payments.wf_payment wf
+                     WHERE wf.empreiteira = sb.empreiteira AND wf.uf IS NOT NULL),
+                    '—'
+                ) AS regiao
+            FROM payments.supplier_bridge sb
+            JOIN payments.contract_master cm ON cm.supplier_bridge_id = sb.id
+            WHERE {where_clause}
+            ORDER BY sb.empreiteira
+        """
+        async with connect_payments() as c:
+            rows = await c.fetch(sql, *params)
+        return [
+            {"nome": r["nome"], "cnpj": r["cnpj"], "regiao": r["regiao"] or "—"}
+            for r in rows
+        ]
+
+    async def list_ufs_disponiveis(self) -> list[str]:
+        """UFs distintas presentes em wf_payment — alimenta o dropdown
+        de filtro 'Estado'. Excluindo NULL e ordem alfabética."""
+        async with connect_payments() as c:
+            rows = await c.fetch(
+                """
+                SELECT DISTINCT uf
+                FROM payments.wf_payment
+                WHERE uf IS NOT NULL
+                ORDER BY uf
+                """
+            )
+        return [r["uf"] for r in rows]
+
     async def chart_risco_financeiro(self, limit: int = 5) -> list[dict[str, Any]]:
         """Top-N empreiteiras por soma de value_at_risk_brl em findings
         abertos. Ordem descendente — primeira linha é a mais arriscada."""
