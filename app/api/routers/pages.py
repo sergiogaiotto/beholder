@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.api.deps import (
@@ -610,6 +610,135 @@ async def payments_empreiteiras_wf_alertas_page(
             severity_label_active=severity or "",
         ),
     )
+
+
+@router.get("/payments/empreiteiras-wf/ingestao", response_class=HTMLResponse)
+async def payments_empreiteiras_wf_ingestao_page(
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+    just_uploaded: str | None = None,
+):
+    """Tela de ingestão XLSX/MSRV5 (Fase 3.5).
+
+    `just_uploaded` é o run_id após PRG do upload — UI exibe banner
+    confirmando a fila e destaca a linha correspondente na tabela.
+    """
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.ingestion_service import PaymentsIngestionService
+
+    svc = PaymentsIngestionService()
+    projections = svc.list_projections()
+    runs = await svc.list_recent_runs(limit=20)
+
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/ingestao.html",
+        await _ctx(
+            request, user,
+            active_module="empreiteiras_wf",
+            projections=projections,
+            runs=runs,
+            just_uploaded=just_uploaded or "",
+        ),
+    )
+
+
+@router.post("/payments/empreiteiras-wf/ingestao/upload")
+async def payments_empreiteiras_wf_ingestao_upload(
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+    projection_name: str = Form(...),
+    file: UploadFile = File(...),
+):
+    """Recebe upload, enfileira no dramatiq, redireciona pra /ingestao
+    com o run_id na query (UI mostra banner)."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.ingestion_service import PaymentsIngestionService
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "arquivo vazio")
+
+    svc = PaymentsIngestionService()
+    try:
+        run_id = await svc.queue_upload(
+            file_bytes=file_bytes,
+            filename=file.filename or "upload.bin",
+            projection_name=projection_name,
+            user_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return RedirectResponse(
+        f"/payments/empreiteiras-wf/ingestao?just_uploaded={run_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get(
+    "/payments/empreiteiras-wf/ingestao/runs",
+    response_class=HTMLResponse,
+)
+async def payments_empreiteiras_wf_ingestao_runs_partial(
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+):
+    """Partial HTMX da tabela de runs — pra refresh manual ou polling
+    do dashboard quando há run em execução."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.ingestion_service import PaymentsIngestionService
+
+    svc = PaymentsIngestionService()
+    runs = await svc.list_recent_runs(limit=20)
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/_ingestao_runs.html",
+        {"request": request, "runs": runs, "just_uploaded": ""},
+    )
+
+
+@router.get(
+    "/payments/empreiteiras-wf/ingestao/runs/{run_id}",
+    response_class=JSONResponse,
+)
+async def payments_empreiteiras_wf_ingestao_run_status(
+    run_id: str,
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+):
+    """Status JSON de 1 run específico — alimenta o polling HTMX/JS do
+    Bloco C."""
+    if not user:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "autenticação requerida")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.ingestion_service import PaymentsIngestionService
+
+    try:
+        run_uuid = __import__("uuid").UUID(run_id)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "run_id inválido") from exc
+
+    svc = PaymentsIngestionService()
+    run = await svc.get_run(run_uuid)
+    if run is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "run não encontrado")
+
+    # JSON-safe: converte datetimes em ISO 8601.
+    run_jsonable = {
+        **run,
+        "started_at": run["started_at"].isoformat() if run["started_at"] else None,
+        "finished_at": run["finished_at"].isoformat() if run["finished_at"] else None,
+    }
+    return JSONResponse(run_jsonable)
 
 
 @router.get("/payments/empreiteiras-wf/alertas/{finding_id}", response_class=HTMLResponse)

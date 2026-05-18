@@ -66,6 +66,7 @@ async def load_source_by_path(
     *,
     triggered_by_user_id: UUID | None = None,
     projections_dir: Path | str | None = None,
+    existing_run_id: UUID | None = None,
 ) -> LoadResult:
     """Carrega 1 arquivo completo via projeção declarada em configs/.
 
@@ -74,6 +75,9 @@ async def load_source_by_path(
       projection_name: nome do YAML (sem extensão). Ex: 'wf_payment'.
       triggered_by_user_id: opcional, fica em IngestionRun.triggered_by_user_id.
       projections_dir: override do dir de YAMLs (default: PROJECTIONS_DIR).
+      existing_run_id: se passado, reusa um IngestionRun já criado pelo caller
+        (UI flow — service pré-cria o run em PENDING antes de despachar o
+        actor dramatiq para que a UI tenha um run_id pra fazer polling).
     """
     base_dir = Path(projections_dir) if projections_dir else PROJECTIONS_DIR
     yaml_path = base_dir / f"{projection_name}.yaml"
@@ -83,6 +87,7 @@ async def load_source_by_path(
         config=config,
         source_path=src_path,
         triggered_by_user_id=triggered_by_user_id,
+        existing_run_id=existing_run_id,
     )
 
 
@@ -92,25 +97,35 @@ async def load_source(
     source_path: Path,
     triggered_by_user_id: UUID | None = None,
     src_iter: Iterator[dict[str, Any]] | None = None,
+    existing_run_id: UUID | None = None,
 ) -> LoadResult:
     """Versão expandida — aceita config já carregado e/ou src_iter custom.
 
     Útil pra tests que sintetizam dicts diretamente ou pra fluxos onde
     o source não vem de arquivo (stream de webhook, etc.).
+
+    `existing_run_id` permite reusar um IngestionRun pré-existente (UI
+    flow Fase 3.5 — service cria o run PENDING antes do actor dramatiq).
     """
     ingestion_repo = PgIngestionRunRepository()
     target_repo = resolve_repo(config.target_entity)
     target_cls = resolve_entity(config.target_entity)
 
-    run = IngestionRun(
-        source_type=_source_type_for(config),
-        source_filename=source_path.name,
-        source_size_bytes=_safe_size(source_path),
-        target_table=target_table_for(config.target_entity),
-        triggered_by_user_id=triggered_by_user_id,
-        metadata={"projection_target": config.target_entity},
-    )
-    await ingestion_repo.create(run)
+    if existing_run_id is not None:
+        existing = await ingestion_repo.get(existing_run_id)
+        if existing is None:
+            raise ValueError(f"existing_run_id {existing_run_id} não encontrado")
+        run = existing
+    else:
+        run = IngestionRun(
+            source_type=_source_type_for(config),
+            source_filename=source_path.name,
+            source_size_bytes=_safe_size(source_path),
+            target_table=target_table_for(config.target_entity),
+            triggered_by_user_id=triggered_by_user_id,
+            metadata={"projection_target": config.target_entity},
+        )
+        await ingestion_repo.create(run)
     await ingestion_repo.mark_running(run.id)
 
     # Injeta ingestion_run_id nos defaults SE o model tem o campo

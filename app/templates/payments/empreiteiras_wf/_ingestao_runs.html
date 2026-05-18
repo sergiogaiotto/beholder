@@ -1,0 +1,67 @@
+{#
+  Partial da tabela "Últimas cargas" (IngestionRun).
+
+  Renderizado em duas situações:
+    1. Inline em `ingestao.html` (primeira render da tela).
+    2. Como resposta HTMX de /payments/empreiteiras-wf/ingestao/runs
+       quando o user clica "Atualizar" (substitui #runs-section).
+
+  Ambos os caminhos recebem `runs` (lista de dicts já formatados) e o flag
+  opcional `just_uploaded` para destacar a linha recém-enfileirada.
+#}
+<div id="runs-section">
+  <table class="w-full text-sm">
+    <thead class="text-[11px] uppercase tracking-wider text-neutral-500 bg-neutral-50">
+      <tr>
+        <th class="text-left py-2 px-3 font-medium">Início</th>
+        <th class="text-left py-2 px-3 font-medium">Arquivo</th>
+        <th class="text-left py-2 px-3 font-medium">Projeção</th>
+        <th class="text-left py-2 px-3 font-medium">Status</th>
+        <th class="text-right py-2 px-3 font-medium">Rows</th>
+        <th class="text-right py-2 px-3 font-medium">Duração</th>
+        <th class="text-left py-2 px-3 font-medium">Erro</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in runs %}
+        {% set st_class = {
+          'pending':   'bg-neutral-100 text-neutral-700',
+          'running':   'bg-ai-50 text-ai-800',
+          'completed': 'bg-brand-50 text-brand-800',
+          'failed':    'bg-risk-50 text-risk-800',
+        }.get(r.status, 'bg-neutral-100 text-neutral-700') %}
+        <tr class="border-t border-neutral-100 {% if just_uploaded == r.id %}bg-amber-50/40{% endif %}"
+            id="run-{{ r.id }}">
+          <td class="py-2 px-3 text-neutral-600 font-mono text-[11px]">{{ r.started_at_fmt }}</td>
+          <td class="py-2 px-3 font-medium truncate max-w-[240px]" title="{{ r.source_filename }}">
+            {{ r.source_filename }}
+          </td>
+          <td class="py-2 px-3 text-neutral-600 font-mono text-[11px]">{{ r.projection_name or '—' }}</td>
+          <td class="py-2 px-3">
+            <span class="text-[10px] px-1.5 py-0.5 rounded {{ st_class }}">{{ r.status_label }}</span>
+          </td>
+          <td class="py-2 px-3 text-right font-mono text-xs">
+            {% if r.rows_inserted > 0 %}
+              {{ "{:,}".format(r.rows_inserted) }}
+              {% if r.rows_skipped > 0 %}
+                <span class="text-neutral-400">+{{ r.rows_skipped }} skip</span>
+              {% endif %}
+            {% else %}
+              <span class="text-neutral-400">—</span>
+            {% endif %}
+          </td>
+          <td class="py-2 px-3 text-right font-mono text-xs text-neutral-600">{{ r.elapsed_fmt }}</td>
+          <td class="py-2 px-3 text-[11px] text-risk-700 truncate max-w-[280px]" title="{{ r.error_message or '' }}">
+            {{ r.error_message or '' }}
+          </td>
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="7" class="text-center py-10 text-neutral-400 italic">
+            nenhuma carga ainda — escolha uma projeção acima e suba um arquivo.
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
