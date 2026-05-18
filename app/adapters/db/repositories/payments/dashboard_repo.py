@@ -18,10 +18,23 @@ rules engine. Mantido aqui via helper para que mudança futura propague:
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from typing import Any
 
 from app.adapters.db.postgres_payments import connect_payments
+
+
+def _maybe_parse_jsonb(v: Any) -> Any:
+    """JSONB do asyncpg pode chegar como dict/list (codec configurado) ou
+    como string crua. Aceita ambos — None → {}.
+    Promovido a module-level pra reuso entre get_finding (Fase 3 Bloco F)
+    e get_analytic_finding / list_analytic_findings (Fase 2.5.1)."""
+    if v is None:
+        return {}
+    if isinstance(v, (dict, list)):
+        return v
+    return json.loads(v)
 
 
 # Filtro universal — duplicado do rules engine (_base.py:_UNIVERSE_FILTER_SQL)
@@ -504,18 +517,6 @@ class PaymentsDashboardRepository:
             )
             if row is None:
                 return None
-        # JSONB: o pool payments tem codec configurado (devolve dict direto);
-        # mas em ambientes sem codec custom asyncpg devolve string — aceita
-        # ambos os caminhos.
-        import json
-
-        def _maybe_parse_jsonb(v: Any) -> Any:
-            if v is None:
-                return {}
-            if isinstance(v, (dict, list)):
-                return v
-            return json.loads(v)
-
         return {
             "id": str(row["id"]),
             "rule_code": row["rule_code"],
@@ -572,6 +573,208 @@ class PaymentsDashboardRepository:
                 decided_by_user_id,
             )
         # asyncpg.execute devolve string tipo 'UPDATE 1'
+        return result.endswith(" 1")
+
+    # =========================================================== Desvios (Fase 2.5.1)
+
+    async def list_analytic_findings(
+        self,
+        *,
+        severity: str | None = None,
+        detector_code: str | None = None,
+        status_in: tuple[str, ...] | None = None,
+        search: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict[str, Any]:
+        """Lista paginada de analytic_finding (output dos detectores R7).
+
+        Espelha `list_findings` (reconciliation) com semântica analytics:
+          - severity: 'high' | 'medium' | 'low'
+          - detector_code: 'R7_LPU_OUTLIER', 'R7_VALIDADE_VENCIDA', ...
+          - status_in: tupla de statuses (default = abertos)
+          - search: ILIKE em detector_code
+        """
+        page = max(1, page)
+        per_page = max(1, min(100, per_page))
+        offset = (page - 1) * per_page
+
+        where = ["1=1"]
+        params: list[Any] = []
+        if severity:
+            params.append(severity)
+            where.append(f"af.severity = ${len(params)}")
+        if detector_code:
+            params.append(detector_code)
+            where.append(f"af.detector_code = ${len(params)}")
+        if status_in is None:
+            status_in = _OPEN_STATUSES
+        params.append(list(status_in))
+        where.append(f"af.status = ANY(${len(params)}::text[])")
+        if search:
+            params.append(f"%{search}%")
+            where.append(f"af.detector_code ILIKE ${len(params)}")
+
+        where_clause = " AND ".join(where)
+        async with connect_payments() as c:
+            total = await c.fetchval(
+                f"""
+                SELECT COUNT(*)
+                FROM payments.analytic_finding af
+                WHERE {where_clause}
+                """,
+                *params,
+            )
+            params_with_pagination = [*params, per_page, offset]
+            i_lim = len(params_with_pagination) - 1
+            i_off = len(params_with_pagination)
+            rows = await c.fetch(
+                f"""
+                SELECT
+                    af.id,
+                    af.detector_code,
+                    af.severity,
+                    af.status,
+                    af.score,
+                    af.expected_range,
+                    af.actual_value,
+                    af.detected_at,
+                    sb.empreiteira AS supplier_nome,
+                    sb.cnpj        AS supplier_cnpj
+                FROM payments.analytic_finding af
+                LEFT JOIN payments.supplier_bridge sb ON sb.id = af.supplier_id
+                WHERE {where_clause}
+                ORDER BY af.detected_at DESC, af.id
+                LIMIT ${i_lim} OFFSET ${i_off}
+                """,
+                *params_with_pagination,
+            )
+
+        items = [
+            {
+                "id": str(r["id"]),
+                "detector_code": r["detector_code"],
+                "severity": r["severity"],
+                "status": r["status"],
+                "score": float(r["score"]) if r["score"] is not None else None,
+                "expected_range": _maybe_parse_jsonb(r["expected_range"]),
+                "actual_value": _maybe_parse_jsonb(r["actual_value"]),
+                "detected_at": r["detected_at"],
+                "supplier_nome": r["supplier_nome"] or "—",
+                "supplier_cnpj": r["supplier_cnpj"] or "—",
+            }
+            for r in rows
+        ]
+
+        total_int = int(total or 0)
+        pages = max(1, (total_int + per_page - 1) // per_page)
+        return {
+            "rows": items,
+            "total": total_int,
+            "page": page,
+            "per_page": per_page,
+            "pages": pages,
+        }
+
+    async def list_detector_codes_with_findings(self) -> list[str]:
+        """detector_codes únicos que têm pelo menos 1 finding (qualquer
+        status). Alimenta o dropdown 'Detector' da inbox /desvios."""
+        async with connect_payments() as c:
+            rows = await c.fetch(
+                """
+                SELECT DISTINCT detector_code
+                FROM payments.analytic_finding
+                ORDER BY detector_code
+                """
+            )
+        return [r["detector_code"] for r in rows]
+
+    async def get_analytic_finding(self, finding_id: str) -> dict[str, Any] | None:
+        """Detalhe de 1 analytic_finding com JOIN detector + supplier.
+        Devolve dict pronto pro template; None se UUID não existe."""
+        async with connect_payments() as c:
+            row = await c.fetchrow(
+                """
+                SELECT
+                    af.id,
+                    af.detector_code,
+                    af.severity,
+                    af.status,
+                    af.score,
+                    af.expected_range,
+                    af.actual_value,
+                    af.evidence_payment_ids,
+                    af.wf_payment_id,
+                    af.wf_payment_data_pedido,
+                    af.detected_at,
+                    af.decision_reason,
+                    af.decided_at,
+                    ad.name        AS detector_name,
+                    ad.description AS detector_description,
+                    ad.technique   AS detector_technique,
+                    sb.id          AS supplier_id,
+                    sb.empreiteira AS supplier_nome,
+                    sb.cnpj        AS supplier_cnpj,
+                    u_decided.username AS decided_by_username
+                FROM payments.analytic_finding af
+                LEFT JOIN payments.analytic_detector ad ON ad.id = af.detector_id
+                LEFT JOIN payments.supplier_bridge   sb ON sb.id = af.supplier_id
+                LEFT JOIN users u_decided ON u_decided.id = af.decided_by_id
+                WHERE af.id = $1::uuid
+                """,
+                finding_id,
+            )
+            if row is None:
+                return None
+
+        return {
+            "id": str(row["id"]),
+            "detector_code": row["detector_code"],
+            "detector_name": row["detector_name"] or row["detector_code"],
+            "detector_description": row["detector_description"] or "",
+            "detector_technique": row["detector_technique"] or "",
+            "severity": row["severity"],
+            "status": row["status"],
+            "score": float(row["score"]) if row["score"] is not None else None,
+            "expected_range": _maybe_parse_jsonb(row["expected_range"]),
+            "actual_value": _maybe_parse_jsonb(row["actual_value"]),
+            "evidence_payment_ids": list(row["evidence_payment_ids"] or []),
+            "wf_payment_id": int(row["wf_payment_id"]) if row["wf_payment_id"] else None,
+            "wf_payment_data_pedido": row["wf_payment_data_pedido"],
+            "detected_at": row["detected_at"],
+            "decision_reason": row["decision_reason"],
+            "decided_at": row["decided_at"],
+            "decided_by_username": row["decided_by_username"],
+            "supplier_id": str(row["supplier_id"]) if row["supplier_id"] else None,
+            "supplier_nome": row["supplier_nome"] or "—",
+            "supplier_cnpj": row["supplier_cnpj"] or "—",
+        }
+
+    async def update_analytic_finding_status(
+        self,
+        finding_id: str,
+        *,
+        new_status: str,
+        decision_reason: str | None,
+        decided_by_user_id: str | None,
+    ) -> bool:
+        """Atualiza status + decision_reason + decided_by + decided_at do
+        analytic_finding. Returns True se atualizou."""
+        async with connect_payments() as c:
+            result = await c.execute(
+                """
+                UPDATE payments.analytic_finding
+                SET status = $2,
+                    decision_reason = $3,
+                    decided_by_id = $4::uuid,
+                    decided_at = NOW()
+                WHERE id = $1::uuid
+                """,
+                finding_id,
+                new_status,
+                decision_reason,
+                decided_by_user_id,
+            )
         return result.endswith(" 1")
 
     async def list_rule_codes_with_findings(self) -> list[str]:

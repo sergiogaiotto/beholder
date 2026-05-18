@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}Desvio {{ desvio.detector_code }} — Empreiteiras WF{% endblock %}
+
+{#
+  Detalhe do analytic_finding (Fase 2.5.1). Layout 2-col análogo ao
+  `alerta_detalhe.html` (Fase 3 Bloco F): contexto à esquerda, workflow
+  HITL à direita. Diferenças semânticas:
+    - Sem rule_code; usa detector_code + name + technique (z-score/iqr/etc.)
+    - Score numérico explícito (z-score, distância IQR, ratio)
+    - expected_range carrega method/factor/min/max etc. — UI mostra como tabela
+#}
+
+{% block content %}
+<div class="bg-brand-700 text-white">
+  <div class="px-6 py-4">
+    <div class="text-[11px] opacity-70 mb-0.5">
+      <a href="/payments/empreiteiras-wf" class="hover:underline">Empreiteiras WF</a>
+      <span class="mx-1.5">›</span>
+      <a href="/payments/empreiteiras-wf/desvios" class="hover:underline">Desvios</a>
+      <span class="mx-1.5">›</span>
+      {{ desvio.id[:8] }}
+    </div>
+    <h1 class="text-xl font-semibold tracking-tight">
+      {{ desvio.detector_name }}
+      <span class="ml-2 text-sm opacity-80 font-mono">{{ desvio.detector_code }}</span>
+    </h1>
+  </div>
+</div>
+
+<div class="px-6 py-5 pb-12 max-w-full">
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+    <!-- Esquerda: contexto -->
+    <div class="lg:col-span-2 space-y-4">
+
+      <!-- Resumo do desvio -->
+      <section class="bg-white border border-neutral-200 rounded-lg p-4">
+        {% set sev_class = {'high':'bg-risk-50 text-risk-800', 'medium':'bg-amber-50 text-amber-800', 'low':'bg-neutral-100 text-neutral-700'}.get(desvio.severity, 'bg-neutral-100 text-neutral-700') %}
+        {% set st_class  = {'open':'bg-brand-50 text-brand-800', 'in_analysis':'bg-ai-50 text-ai-800', 'escalated':'bg-amber-50 text-amber-800', 'accepted_fp':'bg-neutral-100 text-neutral-600', 'blocked':'bg-risk-50 text-risk-800'}.get(desvio.status, 'bg-neutral-100 text-neutral-700') %}
+        <header class="flex items-start justify-between gap-3 mb-3 flex-wrap">
+          <div>
+            <h2 class="text-sm font-medium mb-1">Resumo</h2>
+            <p class="text-[11px] text-neutral-500">{{ desvio.detector_description }}</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] px-1.5 py-0.5 rounded {{ sev_class }}">{{ desvio.severity_label }}</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded {{ st_class }}">{{ desvio.status_label }}</span>
+          </div>
+        </header>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500">Score</div>
+            <div class="text-lg font-mono mt-0.5">{{ desvio.score_fmt }}</div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500">Técnica</div>
+            <div class="font-mono mt-0.5">{{ desvio.detector_technique }}</div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500">Detectado em</div>
+            <div class="font-mono mt-0.5">{{ desvio.detected_at_fmt }}</div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500">Pagamento ref.</div>
+            <div class="font-mono mt-0.5">
+              {% if desvio.wf_payment_id %}
+                #{{ desvio.wf_payment_id }} · {{ desvio.wf_payment_data_pedido or "—" }}
+              {% else %}
+                <span class="text-neutral-400 italic">agregado (sem payment único)</span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Fornecedor -->
+      <section class="bg-white border border-neutral-200 rounded-lg p-4">
+        <h2 class="text-sm font-medium mb-3">Fornecedor</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500">Nome</div>
+            <div class="mt-0.5 font-medium">{{ desvio.supplier_nome }}</div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500">CNPJ</div>
+            <div class="mt-0.5 font-mono">{{ desvio.supplier_cnpj }}</div>
+          </div>
+        </div>
+        {% if desvio.evidence_payment_ids %}
+          <div class="mt-3 pt-3 border-t border-neutral-100">
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">
+              Pagamentos de evidência ({{ desvio.evidence_payment_ids | length }})
+            </div>
+            <div class="text-[11px] font-mono text-neutral-600 break-all">
+              {{ desvio.evidence_payment_ids | join(", ") }}
+            </div>
+          </div>
+        {% endif %}
+      </section>
+
+      <!-- Evidências estatísticas: expected_range vs actual_value -->
+      <section class="bg-white border border-neutral-200 rounded-lg p-4">
+        <h2 class="text-sm font-medium mb-3">Evidência estatística</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div class="bg-neutral-50/50 border border-neutral-100 rounded p-3">
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500 mb-2">Intervalo esperado</div>
+            {% if desvio.expected_range %}
+              <table class="w-full font-mono text-[11px]">
+                {% for k, v in desvio.expected_range.items() %}
+                  <tr class="border-b border-neutral-100 last:border-0">
+                    <td class="py-1 pr-2 text-neutral-600">{{ k }}</td>
+                    <td class="py-1 text-right">{{ v }}</td>
+                  </tr>
+                {% endfor %}
+              </table>
+            {% else %}
+              <div class="text-neutral-400 italic">—</div>
+            {% endif %}
+          </div>
+          <div class="bg-neutral-50/50 border border-neutral-100 rounded p-3">
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500 mb-2">Valor observado</div>
+            {% if desvio.actual_value %}
+              <table class="w-full font-mono text-[11px]">
+                {% for k, v in desvio.actual_value.items() %}
+                  <tr class="border-b border-neutral-100 last:border-0">
+                    <td class="py-1 pr-2 text-neutral-600">{{ k }}</td>
+                    <td class="py-1 text-right">{{ v }}</td>
+                  </tr>
+                {% endfor %}
+              </table>
+            {% else %}
+              <div class="text-neutral-400 italic">—</div>
+            {% endif %}
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- Direita: workflow + histórico -->
+    <div class="space-y-4">
+
+      <section class="bg-white border border-neutral-200 rounded-lg p-4">
+        <h2 class="text-sm font-medium mb-3">Ações</h2>
+
+        {% if desvio.is_terminal %}
+          <div class="text-[11px] text-neutral-500 italic">
+            estado terminal ({{ desvio.status_label }}) — sem transições disponíveis
+          </div>
+        {% else %}
+          <form method="POST"
+                action="/payments/empreiteiras-wf/desvios/{{ desvio.id }}/decide"
+                class="space-y-3">
+            <div>
+              <label class="text-[10px] uppercase tracking-wider text-neutral-500">Nova situação</label>
+              <select name="new_status"
+                      class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600">
+                {% for t in desvio.available_transitions %}
+                  <option value="{{ t.key }}">{{ t.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="text-[10px] uppercase tracking-wider text-neutral-500">Motivo / observação</label>
+              <textarea name="decision_reason" rows="4"
+                        placeholder="contexto que justifica a decisão (opcional)…"
+                        class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600 font-mono"></textarea>
+            </div>
+            <button type="submit"
+                    class="w-full px-3 py-2 rounded bg-brand-600 text-white text-sm hover:bg-brand-700">
+              Aplicar decisão
+            </button>
+          </form>
+        {% endif %}
+      </section>
+
+      {% if desvio.decided_at %}
+        <section class="bg-neutral-50 border border-neutral-200 rounded-lg p-4">
+          <h2 class="text-sm font-medium mb-2">Última decisão</h2>
+          <div class="text-[11px] text-neutral-600 space-y-1">
+            <div>
+              <span class="text-neutral-400">por</span>
+              <span class="font-medium">{{ desvio.decided_by_username or "—" }}</span>
+            </div>
+            <div>
+              <span class="text-neutral-400">em</span>
+              <span class="font-mono">{{ desvio.decided_at_fmt }}</span>
+            </div>
+            {% if desvio.decision_reason %}
+              <div class="mt-2 pt-2 border-t border-neutral-200">
+                <div class="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">motivo</div>
+                <div class="text-neutral-800 whitespace-pre-wrap">{{ desvio.decision_reason }}</div>
+              </div>
+            {% endif %}
+          </div>
+        </section>
+      {% endif %}
+
+      <a href="/payments/empreiteiras-wf/desvios"
+         class="block text-center text-[11px] text-neutral-500 hover:text-brand-700 hover:underline">
+        ← Voltar ao inbox
+      </a>
+
+    </div>
+  </div>
+</div>
+{% endblock %}
