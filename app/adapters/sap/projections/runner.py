@@ -11,6 +11,7 @@ API principal:
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,20 @@ from app.core.domain import payments as _payments_domain
 
 
 PROJECTIONS_DIR = Path(__file__).parent / "configs"
+
+
+@dataclass
+class ProjectStats:
+    """Contadores opcionais — passados ao project() para o loader (F) tracking."""
+
+    rows_seen: int = 0
+    """Total de rows iteradas do source (inclui yielded + skipped)."""
+
+    rows_yielded: int = 0
+    """Rows que viraram domain models (foram pra batch do loader)."""
+
+    rows_skipped: int = 0
+    """Rows descartadas por on_missing='skip_row' em campos required."""
 
 
 # ---------------------------------------------------------------------------
@@ -62,26 +77,48 @@ def list_projections(directory: Path | str | None = None) -> dict[str, Path]:
 def project(
     config: ProjectionConfig,
     src_iter: Iterator[dict[str, Any]],
+    *,
+    stats: ProjectStats | None = None,
 ) -> Iterator[BaseModel]:
     """Itera src_iter (output de parsers) e yields domain models projetados.
 
-    Levanta ValueError em campos required ausentes. Catchall absorve unmapped
-    keys conforme `config.catchall`.
+    Comportamento em campos required ausentes:
+      - on_missing='raise' (default): ValueError aborta toda a ingestão.
+      - on_missing='skip_row': row inteira descartada; se `stats` fornecido,
+        incrementa rows_skipped.
+
+    Catchall absorve unmapped keys conforme `config.catchall`.
+
+    Args:
+      stats: opcional ProjectStats — recebe contadores de rows_seen/yielded/skipped.
     """
     target_cls = resolve_entity(config.target_entity)
     mapped_sources = {m.source for m in config.columns.values()}
 
     for src_row in src_iter:
+        if stats is not None:
+            stats.rows_seen += 1
+
         kwargs: dict[str, Any] = dict(config.defaults)
+        skip_row = False
+
         for target_field, mapping in config.columns.items():
             raw = src_row.get(mapping.source)
             value = coerce_value(raw, mapping)
             if value is None and mapping.required:
+                if mapping.on_missing == "skip_row":
+                    skip_row = True
+                    break
                 raise ValueError(
                     f"{config.target_entity}.{target_field}: required field "
                     f"missing from source key {mapping.source!r}"
                 )
             kwargs[target_field] = value
+
+        if skip_row:
+            if stats is not None:
+                stats.rows_skipped += 1
+            continue
 
         if config.catchall is not None and config.catchall.include_unmapped:
             extras = {
@@ -92,6 +129,8 @@ def project(
             }
             kwargs[config.catchall.field] = _json_safe(extras)
 
+        if stats is not None:
+            stats.rows_yielded += 1
         yield target_cls(**kwargs)
 
 

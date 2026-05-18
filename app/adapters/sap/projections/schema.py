@@ -56,7 +56,15 @@ class FieldMapping(BaseModel):
     """Nome do Enum em `app.core.domain.payments` (obrigatório se type='enum')."""
 
     required: bool = False
-    """Se True, fonte ausente/None levanta ValueError."""
+    """Se True, fonte ausente/None aciona on_missing."""
+
+    on_missing: Literal["raise", "skip_row"] = "raise"
+    """Comportamento quando required=True e raw is None/empty:
+       - raise (default): ValueError, ingestão inteira aborta — fail-fast.
+       - skip_row: skipa silenciosamente, incrementa ProjectStats.rows_skipped.
+                   Útil para campos NOT NULL no DB onde % das rows não têm
+                   o valor (ex.: WF.data_pedido populated em 86%; CC+CONTA
+                   tem 85 rows com CONTA null)."""
 
     default: Any = None
     """Valor a usar quando fonte é None/vazio. Ignorado se required=True."""

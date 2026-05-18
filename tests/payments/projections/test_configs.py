@@ -189,11 +189,29 @@ def test_cost_center_smoke(configs):
     assert cca.conta_razao == "6010101"
 
 
-def test_wf_payment_required_data_pedido_raises_if_missing(configs):
-    """data_pedido é required (partition key WF) — DT ausente quebra."""
+def test_wf_payment_data_pedido_missing_skips_row(configs):
+    """data_pedido required + on_missing=skip_row → row descartada (não quebra)."""
+    from app.adapters.sap.projections import ProjectStats
+
     cfg = configs["wf_payment"]
-    rows = [{"SISTEMA": "WF1", "OS": "OS-1"}]
-    with pytest.raises(ValueError, match="data_pedido"):
+    rows = [
+        {"SISTEMA": "WF1", "OS": "OS-skip"},  # sem DATA_PEDIDO → skip
+        {"SISTEMA": "WF1", "OS": "OS-ok", "DATA_PEDIDO": datetime(2025, 6, 1)},
+    ]
+    stats = ProjectStats()
+    result = list(project(cfg, iter(rows), stats=stats))
+    assert len(result) == 1
+    assert result[0].os_num == "OS-ok"
+    assert stats.rows_seen == 2
+    assert stats.rows_yielded == 1
+    assert stats.rows_skipped == 1
+
+
+def test_wf_payment_os_missing_raises(configs):
+    """OS é required + on_missing=raise (default) → ValueError."""
+    cfg = configs["wf_payment"]
+    rows = [{"SISTEMA": "WF1", "DATA_PEDIDO": datetime(2025, 6, 1)}]
+    with pytest.raises(ValueError, match="os_num"):
         list(project(cfg, iter(rows)))
 
 

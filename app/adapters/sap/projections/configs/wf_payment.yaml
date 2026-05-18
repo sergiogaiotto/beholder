@@ -36,6 +36,8 @@ columns:
     source: DATA_PEDIDO
     type: date
     required: true
+    on_missing: skip_row  # Pré-B §3.4: DATA_PEDIDO populated em 86% — 14% skip
+                          # (rows sem data não podem ir pra partição RANGE)
   data_execucao:
     source: DATA_EXECUCAO
     type: date
@@ -87,3 +89,7 @@ catchall:
   field: raw_extra
   include_unmapped: true
   exclude_none: true
+
+load:
+  method: bulk_insert
+  batch_size: 50000  # WF = 869k rows; batches maiores reduzem overhead executemany

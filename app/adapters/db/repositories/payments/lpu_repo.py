@@ -1,6 +1,12 @@
 """Implementação asyncpg de LPUItemRepository.
 
 3.1M rows iniciais (MSRV5). Particionada por ano em data_documento (2018-2026).
+
+bulk_insert usa executemany. Tentei copy_records_to_table (asyncpg COPY
+BINARY) mas asyncpg não tem encoder binary nativo pra JSONB (OID 3802) —
+e raw_extra é JSONB no LPUItem. Solução COPY two-step (staging table TEXT
+→ INSERT SELECT com cast) fica como otimização Fase 2 se a curva 3M de
+executemany não bater o SLA com batch_size grande (atual: 50k).
 """
 
 from __future__ import annotations

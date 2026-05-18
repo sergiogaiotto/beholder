@@ -116,7 +116,13 @@ async def test_ingestion_run_lifecycle_transitions(supplier_bridge_xlsx):
 
 
 async def test_loader_marks_failed_on_required_field_missing(tmp_path):
-    """Source sem field required (data_pedido p/ WFPayment) → mark_failed."""
+    """Source sem field required+raise (OS) → mark_failed e re-raise.
+
+    Nota: data_pedido também é required mas tem on_missing=skip_row (Pré-B
+    confirmou 14% null). OS é required + on_missing=raise (default).
+    """
+    from datetime import datetime as _dt
+
     import pytest
     from openpyxl import Workbook
 
@@ -129,15 +135,15 @@ async def test_loader_marks_failed_on_required_field_missing(tmp_path):
     ws = wb.active
     ws.title = "Analitico_Empreiteiras_WF1_WF2_"
     ws.append(list(WF_ANALYTICS_EXPECTED_HEADERS))
-    # Row sem DATA_PEDIDO — vai quebrar em required
     headers = list(WF_ANALYTICS_EXPECTED_HEADERS)
     row = [None] * len(headers)
     row[headers.index("SISTEMA")] = "WF1"
-    row[headers.index("OS")] = "OS-bad"
+    row[headers.index("DATA_PEDIDO")] = _dt(2025, 6, 1)
+    # OS deixado None — vai falhar com on_missing=raise (default)
     ws.append(row)
     wb.save(str(p))
 
-    with pytest.raises(ValueError, match="data_pedido"):
+    with pytest.raises(ValueError, match="os_num"):
         await load_source_by_path(p, "wf_payment")
 
     # IngestionRun precisa ter sido marcado failed antes da exception subir
@@ -145,4 +151,4 @@ async def test_loader_marks_failed_on_required_field_missing(tmp_path):
     recent = await ir_repo.list_recent(limit=5)
     failed_runs = [r for r in recent if r.status is IngestionStatus.FAILED]
     assert len(failed_runs) >= 1
-    assert "data_pedido" in failed_runs[0].error_message
+    assert "os_num" in failed_runs[0].error_message

@@ -20,6 +20,7 @@ columns:
     source: data_documento
     type: date
     required: true
+    on_missing: skip_row  # partition key — rows sem data não cabem
   documento_compras:
     source: documento_compras
     required: true
@@ -45,4 +46,5 @@ defaults:
 
 load:
   method: bulk_insert
-  batch_size: 50000  # MSRV5 é o maior volume — batch maior amortiza overhead
+  batch_size: 100000  # MSRV5 = 3.1M rows; batches maiores amortizam overhead
+                      # executemany (copy_records_to_table não suporta JSONB binary)

@@ -81,9 +81,11 @@ class WFPayment(PaymentsBaseModel):
     malogro: str | None = None  # filtro: != 'ERROR'
 
     # ── contexto financeiro/temporal ───────────────────────────────────
-    mes_medicao: str | None = Field(
-        default=None, pattern=r"^\d{4}/(0[1-9]|1[0-2])$"
-    )
+    # mes_medicao aceita string livre — Pré-B previu "YYYY/MM" mas dados reais
+    # incluem literais como 'PREVISTO' em rows não-fechadas. Regex estrita
+    # quebrava ingestão. Quem precisa validar formato faz no rules engine
+    # (R7 temporal pode filtrar por presença/ausência de '/').
+    mes_medicao: str | None = None
     regional_soe_nova: str | None = None  # 6 vals (CONO, MG, NE, RJ/ES, SP, SUL)
     centro_de_custo: str | None = None  # 360 únicos
 

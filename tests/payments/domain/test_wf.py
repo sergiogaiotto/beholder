@@ -96,13 +96,12 @@ def test_mes_medicao_accepts_valid_format():
     assert wf.mes_medicao == "2024/12"
 
 
-def test_mes_medicao_rejects_invalid_month():
-    with pytest.raises(ValidationError):
-        WFPayment(**_kwargs(mes_medicao="2024/13"))
-    with pytest.raises(ValidationError):
-        WFPayment(**_kwargs(mes_medicao="2024/00"))
-    with pytest.raises(ValidationError):
-        WFPayment(**_kwargs(mes_medicao="2024-05"))  # separador errado
+def test_mes_medicao_accepts_string_literals():
+    """Pré-B esperava só YYYY/MM, mas dados reais têm 'PREVISTO' etc.
+    Domain aceita string livre — validação de formato no rules engine."""
+    for value in ["PREVISTO", "ABERTO", "2024-05"]:
+        wf = WFPayment(**_kwargs(mes_medicao=value))
+        assert wf.mes_medicao == value
 
 
 def test_rejects_negative_valores():

@@ -35,6 +35,7 @@ from app.adapters.sap.parsers import iter_xlsx_rows, parse_msrv5
 from app.adapters.sap.projections import (
     PROJECTIONS_DIR,
     ProjectionConfig,
+    ProjectStats,
     load_projection,
     project,
     resolve_entity,
@@ -52,8 +53,11 @@ class LoadResult:
 
     run: IngestionRun
     rows_read: int
+    """Total de rows iteradas do source (= rows_inserted + rows_skipped)."""
     rows_inserted: int
-    rows_failed: int
+    rows_skipped: int = 0
+    """Rows descartadas por on_missing='skip_row' nas projeções."""
+    rows_failed: int = 0
 
 
 async def load_source_by_path(
@@ -113,10 +117,10 @@ async def load_source(
     # (model_copy é não-destrutivo — não muta o config carregado de YAML).
     effective_config = _inject_ingestion_run_id(config, target_cls, run.id)
 
-    rows_read = 0
     rows_inserted = 0
     batch: list[BaseModel] = []
     method = config.load.method
+    stats = ProjectStats()
 
     try:
         source_iter = (
@@ -125,9 +129,8 @@ async def load_source(
             else _open_source(source_path, config)
         )
 
-        for model in project(effective_config, source_iter):
+        for model in project(effective_config, source_iter, stats=stats):
             batch.append(model)
-            rows_read += 1
             if len(batch) >= config.load.batch_size:
                 rows_inserted += await _flush(target_repo, method, batch)
                 batch = []
@@ -137,9 +140,9 @@ async def load_source(
 
         await ingestion_repo.mark_completed(
             run.id,
-            rows_read=rows_read,
+            rows_read=stats.rows_seen,
             rows_inserted=rows_inserted,
-            rows_skipped=0,
+            rows_skipped=stats.rows_skipped,
             rows_failed=0,
         )
     except Exception as exc:
@@ -148,8 +151,9 @@ async def load_source(
 
     return LoadResult(
         run=run,
-        rows_read=rows_read,
+        rows_read=stats.rows_seen,
         rows_inserted=rows_inserted,
+        rows_skipped=stats.rows_skipped,
         rows_failed=0,
     )
 

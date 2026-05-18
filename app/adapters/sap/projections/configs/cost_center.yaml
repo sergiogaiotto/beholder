@@ -14,9 +14,11 @@ columns:
   centro_de_custo:
     source: CENTRO_DE_CUSTO
     required: true
+    on_missing: skip_row
   conta_razao:
     source: CONTA_RAZAO
     required: true
+    on_missing: skip_row  # 85 das 1.049 rows têm CONTA null — skip silencioso
 
 load:
   method: bulk_upsert  # idempotente por (centro_de_custo, conta_razao)

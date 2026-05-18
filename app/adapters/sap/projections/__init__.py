@@ -7,6 +7,7 @@
 
 from app.adapters.sap.projections.runner import (
     PROJECTIONS_DIR,
+    ProjectStats,
     coerce_value,
     list_projections,
     load_projection,
@@ -30,6 +31,7 @@ __all__ = [
     "CatchallConfig",
     "LoadConfig",
     "PROJECTIONS_DIR",
+    "ProjectStats",
     "load_projection",
     "list_projections",
     "project",
