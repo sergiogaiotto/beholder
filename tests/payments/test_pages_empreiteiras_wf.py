@@ -128,20 +128,75 @@ async def test_kpis_with_empty_db_returns_nine_zeroed_cards(_ensure_payments_sch
 
 
 @pytest.mark.asyncio
-async def test_charts_three_buckets(_ensure_payments_schema):
+async def test_charts_three_buckets_with_empty_db(_ensure_payments_schema):
+    """DB vazio: 3 buckets presentes, alertas_por_tipo sempre tem 3
+    categorias (zeradas), top_fornecedores e risco_financeiro vazios."""
     svc = PaymentsDashboardService()
     charts = await svc.charts()
     assert set(charts.keys()) == {
         "alertas_por_tipo", "top_fornecedores", "risco_financeiro",
     }
-    # alertas_por_tipo: labels e data alinhados.
+    # alertas_por_tipo: 3 labels fixos (Alerta Op./Proc./St. Atípica) mesmo vazio.
     apt = charts["alertas_por_tipo"]
-    assert len(apt["labels"]) == len(apt["data"]) == len(apt["colors"])
-    # top_fornecedores: cada série tem mesmo length dos labels.
+    assert apt["labels"] == ["Alerta Op.", "Alerta Proc.", "St. Atípica"]
+    assert apt["data"] == [0, 0, 0]
+    assert len(apt["colors"]) == 3
+    # top_fornecedores: labels vazios, mas as 3 séries existem.
     tf = charts["top_fornecedores"]
-    n = len(tf["labels"])
+    assert tf["labels"] == []
+    assert [s["name"] for s in tf["series"]] == ["Alerta Op.", "Alerta Proc.", "St. Atípica"]
     for serie in tf["series"]:
-        assert len(serie["data"]) == n, f"série {serie['name']} dessincronizada"
+        assert serie["data"] == []
+    # risco_financeiro vazio.
+    rf = charts["risco_financeiro"]
+    assert rf["labels"] == []
+    assert rf["data"] == []
+
+
+@pytest.mark.asyncio
+async def test_charts_with_seed_data():
+    """Com seed: charts refletem os 2 findings (1 high REGRA_LPU, 1 medium R5_UF)."""
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    charts = await svc.charts()
+
+    # Donut: 1 high → Alerta Op.=1, 1 medium → Alerta Proc.=1, low=0.
+    apt = charts["alertas_por_tipo"]
+    assert apt["data"] == [1, 1, 0]
+
+    # Top fornecedores: ENGEMAN MNT (1 high) e EQS ENGENHARIA (1 medium).
+    tf = charts["top_fornecedores"]
+    assert set(tf["labels"]) == {"ENGEMAN MNT", "EQS ENGENHARIA"}
+    # Stack do high
+    by_label = dict(zip(tf["labels"], tf["series"][0]["data"]))
+    assert by_label["ENGEMAN MNT"] == 1  # 1 finding high
+    assert by_label["EQS ENGENHARIA"] == 0
+    # Stack do medium
+    by_label_med = dict(zip(tf["labels"], tf["series"][1]["data"]))
+    assert by_label_med["ENGEMAN MNT"] == 0
+    assert by_label_med["EQS ENGENHARIA"] == 1
+
+    # Risco financeiro: ENGEMAN MNT (R$ 1000), EQS ENGENHARIA (R$ 500).
+    rf = charts["risco_financeiro"]
+    assert rf["labels"] == ["ENGEMAN MNT", "EQS ENGENHARIA"]
+    assert rf["data"] == [1000.0, 500.0]
+
+
+@pytest.mark.asyncio
+async def test_chart_top_fornecedores_respects_limit():
+    """`chart_top_fornecedores(limit=N)` corta no N. Seed cria só 2 → limite=5
+    devolve 2; limite=1 devolve só o mais arriscado."""
+    await _seed_minimal_dataset()
+    from app.adapters.db.repositories.payments.dashboard_repo import (
+        PaymentsDashboardRepository,
+    )
+    repo = PaymentsDashboardRepository()
+    rows_5 = await repo.chart_top_fornecedores(limit=5)
+    rows_1 = await repo.chart_top_fornecedores(limit=1)
+    assert len(rows_5) == 2
+    assert len(rows_1) == 1
+    # O #1 é ENGEMAN MNT (high vale 3 pontos vs medium 2 da EQS).
+    assert rows_1[0]["empreiteira"] == "ENGEMAN MNT"
 
 
 @pytest.mark.asyncio

@@ -262,44 +262,94 @@ class PaymentsDashboardService:
             },
         ]
 
-    # =========================================================== Mock buckets
+    # =========================================================== Charts (Bloco C)
 
-    async def charts(self) -> dict[str, dict[str, Any]]:
-        """[Mock no Bloco B; Bloco C substitui por queries reais.]
+    # Paleta dos charts — referenciada também pelo template via dataset.
+    _CHART_COLORS = {
+        "Alerta Op.":   "#DC2626",  # brand-600 — high
+        "Alerta Proc.": "#F87171",  # brand-400 — medium
+        "St. Atípica":  "#7F1D1D",  # brand-900 — low
+    }
+    # Gradient cores → vermelho saturado p/ desbotado, para o horizontal bar
+    # do "Risco Financeiro por Fornecedor".
+    _RISCO_GRADIENT = ["#DC2626", "#F87171", "#FCA5A5", "#FECACA", "#FEE2E2"]
 
-        Payload dos 3 charts do print 1 — formato pronto para `Chart.js` 4.x.
+    async def _fetch_chart_buckets(self) -> dict[str, Any]:
+        """Dispara as 3 queries de charts em paralelo."""
+        alertas_por_tipo, top_fornecedores, risco_fin = await asyncio.gather(
+            self.repo.chart_alertas_por_tipo(),
+            self.repo.chart_top_fornecedores(),
+            self.repo.chart_risco_financeiro(),
+        )
+        return {
+            "alertas_por_tipo": alertas_por_tipo,
+            "top_fornecedores": top_fornecedores,
+            "risco_financeiro": risco_fin,
+        }
+
+    async def charts(self, chart_buckets: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+        """Payload dos 3 charts do print 1 (Chart.js 4.x).
+
+        Aceita `chart_buckets` opcional (vindo de `_fetch_chart_buckets`)
+        para evitar refetch quando chamado de `dashboard_payload`. Sempre
+        devolve o shape esperado pelo template — listas vazias se DB vazio.
         """
+        if chart_buckets is None:
+            chart_buckets = await self._fetch_chart_buckets()
+
+        apt = chart_buckets["alertas_por_tipo"]
+        tf = chart_buckets["top_fornecedores"]
+        risco = chart_buckets["risco_financeiro"]
+
+        # Alertas por Tipo (donut) — ordem fixa pra estabilidade visual.
+        apt_labels = [r["tipo"] for r in apt]
+        apt_data = [r["qtd"] for r in apt]
+        apt_colors = [self._CHART_COLORS[t] for t in apt_labels]
+
+        # Top Fornecedores (bar stacked). Cada série é uma severidade.
+        tf_labels = [r["empreiteira"] for r in tf]
+        tf_series = [
+            {
+                "name": "Alerta Op.",
+                "data": [r["alerta_op"] for r in tf],
+                "color": self._CHART_COLORS["Alerta Op."],
+            },
+            {
+                "name": "Alerta Proc.",
+                "data": [r["alerta_proc"] for r in tf],
+                "color": self._CHART_COLORS["Alerta Proc."],
+            },
+            {
+                "name": "St. Atípica",
+                "data": [r["st_atipica"] for r in tf],
+                "color": self._CHART_COLORS["St. Atípica"],
+            },
+        ]
+
+        # Risco Financeiro (horizontal bar) — valores em float pro JS.
+        risco_labels = [r["empreiteira"] for r in risco]
+        risco_data = [float(r["risco_brl"]) for r in risco]
+        # Cores ciclam pela paleta; recorta no tamanho dos dados.
+        risco_colors = self._RISCO_GRADIENT[: max(len(risco_data), 1)]
+
         return {
             "alertas_por_tipo": {
-                "labels": ["Alerta Op.", "St. Atípica"],
-                "data": [7, 2],
-                "colors": ["#DC2626", "#7F1D1D"],
+                "labels": apt_labels,
+                "data": apt_data,
+                "colors": apt_colors,
             },
             "top_fornecedores": {
-                "labels": [
-                    "ENGEMAN MNT",
-                    "EQS ENGENHARIA",
-                    "FFA INFRAESTRUTURA",
-                    "WG PEREIRA",
-                    "ABILITY TECNOLOGIA",
-                ],
-                "series": [
-                    {"name": "Alerta Op.", "data": [3, 2, 1, 1, 1], "color": "#DC2626"},
-                    {"name": "Alerta Proc.", "data": [0, 0, 1, 0, 0], "color": "#F87171"},
-                    {"name": "St. Atípica", "data": [0, 0, 0, 0, 0], "color": "#7F1D1D"},
-                ],
+                "labels": tf_labels,
+                "series": tf_series,
             },
             "risco_financeiro": {
-                "labels": [
-                    "FFA INFRAESTRUTURA",
-                    "ABILITY TECNOLOGIA",
-                    "WG PEREIRA",
-                    "ENGEMAN MNT",
-                    "EQS ENGENHARIA",
-                ],
-                "data": [380000.00, 65000.00, 2010.71, 0.00, 0.00],
+                "labels": risco_labels,
+                "data": risco_data,
+                "colors": risco_colors,
             },
         }
+
+    # =========================================================== Mock buckets
 
     async def fornecedores(self) -> list[dict[str, str]]:
         """[Mock no Bloco B; Bloco D substitui por query real.]"""
@@ -314,13 +364,20 @@ class PaymentsDashboardService:
     # ========================================================== Aggregator
 
     async def dashboard_payload(self) -> dict[str, Any]:
-        """Dispara as 7 queries de KPI uma vez (gather) e monta o dict
-        completo consumido pelo template. Reusa o resultado entre
-        `header_payload` e `kpis` para evitar refetch."""
-        buckets = await self._fetch_kpi_buckets()
+        """Dispara KPIs + Charts em paralelo (10 queries total) e monta o
+        dict completo consumido pelo template. Tabela de fornecedores ainda
+        é mock — vira query real no Bloco D.
+
+        Pool dedicado payments tem max=20 (vide memory/payments_pool_quirks.md);
+        10 conexões simultâneas estão dentro do orçamento (sobra para outras
+        sessões http concorrentes)."""
+        kpi_buckets, chart_buckets = await asyncio.gather(
+            self._fetch_kpi_buckets(),
+            self._fetch_chart_buckets(),
+        )
         return {
-            "header": await self.header_payload(buckets),
-            "kpis": await self.kpis(buckets),
-            "charts": await self.charts(),
+            "header": await self.header_payload(kpi_buckets),
+            "kpis": await self.kpis(kpi_buckets),
+            "charts": await self.charts(chart_buckets),
             "fornecedores": await self.fornecedores(),
         }

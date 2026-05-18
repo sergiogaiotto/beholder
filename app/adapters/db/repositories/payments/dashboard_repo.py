@@ -197,3 +197,98 @@ class PaymentsDashboardRepository:
                 """
             )
             return {"executed_ok": int(executed_ok or 0)}
+
+    # =========================================================== Charts (Bloco C)
+
+    async def chart_alertas_por_tipo(self) -> list[dict[str, Any]]:
+        """Distribuição de findings abertos por 'tipo' derivado da severity.
+
+        Mapeamento (provisório, alinhado com legenda do mockup):
+          high   → 'Alerta Op.'    (operacional — exige ação)
+          medium → 'Alerta Proc.'  (processo — investigar)
+          low    → 'St. Atípica'   (situação atípica — monitorar)
+
+        Sempre devolve as 3 categorias na ordem do mockup, mesmo com 0
+        findings, para que o donut tenha legenda estável entre runs.
+        """
+        async with connect_payments() as c:
+            rows = await c.fetch(
+                """
+                SELECT severity, COUNT(*) AS qtd
+                FROM payments.reconciliation_finding
+                WHERE status = ANY($1::text[])
+                GROUP BY severity
+                """,
+                list(_OPEN_STATUSES),
+            )
+        counts = {r["severity"]: int(r["qtd"]) for r in rows}
+        return [
+            {"tipo": "Alerta Op.", "qtd": counts.get("high", 0)},
+            {"tipo": "Alerta Proc.", "qtd": counts.get("medium", 0)},
+            {"tipo": "St. Atípica", "qtd": counts.get("low", 0)},
+        ]
+
+    async def chart_top_fornecedores(self, limit: int = 5) -> list[dict[str, Any]]:
+        """Top-N empreiteiras por # de findings abertos, com breakdown por
+        severity (stack do bar chart).
+
+        Ranking: peso 3 para high, 2 para medium, 1 para low (privilegia
+        operacionais sem deixar de incluir quem só tem atípicas)."""
+        async with connect_payments() as c:
+            rows = await c.fetch(
+                """
+                SELECT
+                    COALESCE(sb.empreiteira, '—') AS empreiteira,
+                    COUNT(*) FILTER (WHERE rf.severity = 'high')   AS alerta_op,
+                    COUNT(*) FILTER (WHERE rf.severity = 'medium') AS alerta_proc,
+                    COUNT(*) FILTER (WHERE rf.severity = 'low')    AS st_atipica
+                FROM payments.reconciliation_finding rf
+                LEFT JOIN payments.supplier_bridge sb ON sb.id = rf.supplier_id
+                WHERE rf.status = ANY($1::text[])
+                GROUP BY sb.empreiteira
+                ORDER BY (
+                    COUNT(*) FILTER (WHERE rf.severity = 'high') * 3 +
+                    COUNT(*) FILTER (WHERE rf.severity = 'medium') * 2 +
+                    COUNT(*) FILTER (WHERE rf.severity = 'low')
+                ) DESC
+                LIMIT $2
+                """,
+                list(_OPEN_STATUSES),
+                limit,
+            )
+        return [
+            {
+                "empreiteira": r["empreiteira"],
+                "alerta_op": int(r["alerta_op"]),
+                "alerta_proc": int(r["alerta_proc"]),
+                "st_atipica": int(r["st_atipica"]),
+            }
+            for r in rows
+        ]
+
+    async def chart_risco_financeiro(self, limit: int = 5) -> list[dict[str, Any]]:
+        """Top-N empreiteiras por soma de value_at_risk_brl em findings
+        abertos. Ordem descendente — primeira linha é a mais arriscada."""
+        async with connect_payments() as c:
+            rows = await c.fetch(
+                """
+                SELECT
+                    COALESCE(sb.empreiteira, '—') AS empreiteira,
+                    COALESCE(SUM(rf.value_at_risk_brl), 0)::numeric AS risco_brl
+                FROM payments.reconciliation_finding rf
+                LEFT JOIN payments.supplier_bridge sb ON sb.id = rf.supplier_id
+                WHERE rf.status = ANY($1::text[])
+                GROUP BY sb.empreiteira
+                ORDER BY risco_brl DESC
+                LIMIT $2
+                """,
+                list(_OPEN_STATUSES),
+                limit,
+            )
+        return [
+            {
+                "empreiteira": r["empreiteira"],
+                "risco_brl": Decimal(r["risco_brl"]),
+            }
+            for r in rows
+        ]
