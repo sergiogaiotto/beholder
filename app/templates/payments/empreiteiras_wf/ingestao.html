@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Ingestão — Empreiteiras WF{% endblock %}
+
+{#
+  Tela de Ingestão XLSX/MSRV5 (Fase 3.5).
+
+  Layout:
+    1. Header vermelho compacto (breadcrumb)
+    2. Banner de confirmação (PRG após upload com run_id)
+    3. Grid de 8 cards de projeção — cada card abre um modal/form upload
+    4. Tabela 'Últimas cargas' (IngestionRun) com status badge e ações
+       de refresh (HTMX hx-get).
+#}
+
+{% block content %}
+<!-- Header -->
+<div class="bg-brand-700 text-white">
+  <div class="px-6 py-4">
+    <div class="text-[11px] opacity-70 mb-0.5">
+      <a href="/payments/empreiteiras-wf" class="hover:underline">Empreiteiras WF</a>
+      <span class="mx-1.5">›</span>
+      Ingestão
+    </div>
+    <h1 class="text-xl font-semibold tracking-tight">Ingestão de Arquivos</h1>
+    <p class="text-sm opacity-80 mt-1">
+      Suba XLSX (Analítico WF, contratos, SAP) ou MSRV5 TXT — execução
+      assíncrona via worker. Acompanhe o progresso na tabela abaixo.
+    </p>
+  </div>
+</div>
+
+<div class="px-6 py-5 pb-12 max-w-full">
+
+  <!-- Banner de confirmação (após PRG do upload) -->
+  {% if just_uploaded %}
+    <div class="mb-4 bg-brand-50 border border-brand-200 rounded-lg p-3 text-xs text-brand-800 flex items-center gap-2">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12 L11 15 L16 9"/></svg>
+      <span>
+        Upload enfileirado — run <span class="font-mono">{{ just_uploaded[:8] }}</span> em
+        execução no worker. A tabela abaixo atualiza sozinha (HTMX poll).
+      </span>
+    </div>
+  {% endif %}
+
+  <!-- Grid de projeções (cards-upload) -->
+  <section class="mb-6">
+    <header class="mb-3">
+      <h2 class="text-sm font-medium">Selecione o tipo de arquivo</h2>
+      <p class="text-[11px] text-neutral-500">
+        Cada projeção mapeia colunas de origem para uma tabela em <code class="bg-neutral-100 px-1 rounded text-[10px]">payments.*</code>.
+      </p>
+    </header>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+      {% for p in projections %}
+        <form method="POST" action="/payments/empreiteiras-wf/ingestao/upload"
+              enctype="multipart/form-data"
+              class="bg-white border border-neutral-200 rounded-lg p-4 hover:border-brand-400 hover:shadow-sm transition flex flex-col">
+          <input type="hidden" name="projection_name" value="{{ p.key }}">
+
+          <div class="text-[10px] uppercase tracking-wider text-brand-700 mb-1">{{ p.source_type }}</div>
+          <div class="text-sm font-medium mb-1">{{ p.label }}</div>
+          <div class="text-[11px] text-neutral-500 mb-3 flex-1">{{ p.description }}</div>
+
+          <label class="block">
+            <input type="file" name="file" required accept="{{ p.accept }}"
+                   class="block w-full text-[11px] file:mr-2 file:py-1 file:px-2 file:rounded file:border file:border-neutral-300 file:bg-neutral-50 file:text-neutral-700 hover:file:bg-neutral-100 file:cursor-pointer file:text-[10px]" />
+          </label>
+          <button type="submit"
+                  class="mt-3 w-full px-3 py-1.5 rounded bg-brand-600 text-white text-xs hover:bg-brand-700 inline-flex items-center justify-center gap-1.5">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 V14 M7 9 L12 4 L17 9 M5 20 H19"/></svg>
+            Enviar para fila
+          </button>
+        </form>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- Tabela de runs recentes -->
+  <section class="bg-white border border-neutral-200 rounded-lg overflow-hidden">
+    <header class="px-4 py-3 border-b border-neutral-100 flex items-center justify-between">
+      <div>
+        <h2 class="text-sm font-medium">Últimas cargas</h2>
+        <p class="text-[11px] text-neutral-500">Histórico das 20 mais recentes — atualiza automaticamente.</p>
+      </div>
+      <button type="button"
+              hx-get="/payments/empreiteiras-wf/ingestao/runs"
+              hx-target="#runs-section"
+              hx-swap="outerHTML"
+              class="text-[11px] px-2 py-1 rounded border border-neutral-200 hover:bg-neutral-50 inline-flex items-center gap-1">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12 A9 9 0 0 1 18 6 L21 9 M21 3 V9 H15"/><path d="M21 12 A9 9 0 0 1 6 18 L3 15 M3 21 V15 H9"/></svg>
+        Atualizar
+      </button>
+    </header>
+
+    {% include "payments/empreiteiras_wf/_ingestao_runs.html" %}
+  </section>
+
+</div>
+{% endblock %}
