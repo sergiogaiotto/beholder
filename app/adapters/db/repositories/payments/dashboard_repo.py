@@ -452,6 +452,128 @@ class PaymentsDashboardRepository:
             "pages": pages,
         }
 
+    # =========================================================== Detalhe finding (Bloco F)
+
+    async def get_finding(self, finding_id: str) -> dict[str, Any] | None:
+        """Detalhe completo de 1 finding com JOINs (rule, supplier, run,
+        contract_master). Devolve `None` se UUID não existe.
+
+        Faz unwrap dos JSONB `expected_value` / `actual_value` para o
+        template renderizar como key/value table.
+        """
+        async with connect_payments() as c:
+            row = await c.fetchrow(
+                """
+                SELECT
+                    rf.id,
+                    rf.rule_code,
+                    rf.severity,
+                    rf.status,
+                    rf.purchase_order_documento,
+                    rf.purchase_order_item,
+                    rf.wf_payment_data_pedido,
+                    rf.is_monitored_supplier,
+                    rf.expected_value,
+                    rf.actual_value,
+                    rf.delta_pct,
+                    rf.value_at_risk_brl,
+                    rf.detected_at,
+                    rf.decision_reason,
+                    rf.decided_at,
+                    rd.name           AS rule_name,
+                    rd.description    AS rule_description,
+                    rd.engine_type    AS rule_engine_type,
+                    sb.id             AS supplier_id,
+                    sb.empreiteira    AS supplier_nome,
+                    sb.cnpj           AS supplier_cnpj,
+                    sb.contrato_num_sap AS supplier_contrato_sap,
+                    cm.id             AS contract_master_id,
+                    rr.id             AS run_id,
+                    rr.triggered_by   AS run_triggered_by,
+                    rr.started_at     AS run_started_at,
+                    u_decided.username AS decided_by_username
+                FROM payments.reconciliation_finding rf
+                LEFT JOIN payments.rule_definition rd  ON rd.id = rf.rule_id
+                LEFT JOIN payments.supplier_bridge sb  ON sb.id = rf.supplier_id
+                LEFT JOIN payments.contract_master cm  ON cm.id = rf.contract_master_id
+                LEFT JOIN payments.reconciliation_run rr ON rr.id = rf.run_id
+                LEFT JOIN users u_decided              ON u_decided.id = rf.decided_by_id
+                WHERE rf.id = $1::uuid
+                """,
+                finding_id,
+            )
+            if row is None:
+                return None
+        # JSONB: o pool payments tem codec configurado (devolve dict direto);
+        # mas em ambientes sem codec custom asyncpg devolve string — aceita
+        # ambos os caminhos.
+        import json
+
+        def _maybe_parse_jsonb(v: Any) -> Any:
+            if v is None:
+                return {}
+            if isinstance(v, (dict, list)):
+                return v
+            return json.loads(v)
+
+        return {
+            "id": str(row["id"]),
+            "rule_code": row["rule_code"],
+            "rule_name": row["rule_name"] or row["rule_code"],
+            "rule_description": row["rule_description"] or "",
+            "rule_engine_type": row["rule_engine_type"] or "",
+            "severity": row["severity"],
+            "status": row["status"],
+            "purchase_order_documento": row["purchase_order_documento"],
+            "purchase_order_item": row["purchase_order_item"],
+            "wf_payment_data_pedido": row["wf_payment_data_pedido"],
+            "is_monitored_supplier": row["is_monitored_supplier"],
+            "expected_value": _maybe_parse_jsonb(row["expected_value"]),
+            "actual_value": _maybe_parse_jsonb(row["actual_value"]),
+            "delta_pct": float(row["delta_pct"]) if row["delta_pct"] is not None else None,
+            "value_at_risk_brl": Decimal(row["value_at_risk_brl"] or 0),
+            "detected_at": row["detected_at"],
+            "decision_reason": row["decision_reason"],
+            "decided_at": row["decided_at"],
+            "decided_by_username": row["decided_by_username"],
+            "supplier_id": str(row["supplier_id"]) if row["supplier_id"] else None,
+            "supplier_nome": row["supplier_nome"] or "—",
+            "supplier_cnpj": row["supplier_cnpj"] or "—",
+            "supplier_contrato_sap": row["supplier_contrato_sap"] or "—",
+            "contract_master_id": str(row["contract_master_id"]) if row["contract_master_id"] else None,
+            "run_id": str(row["run_id"]) if row["run_id"] else None,
+            "run_triggered_by": row["run_triggered_by"],
+            "run_started_at": row["run_started_at"],
+        }
+
+    async def update_finding_status(
+        self,
+        finding_id: str,
+        *,
+        new_status: str,
+        decision_reason: str | None,
+        decided_by_user_id: str | None,
+    ) -> bool:
+        """Atualiza status + decision_reason + decided_by + decided_at.
+        Returns True se atualizou, False se finding inexistente."""
+        async with connect_payments() as c:
+            result = await c.execute(
+                """
+                UPDATE payments.reconciliation_finding
+                SET status = $2,
+                    decision_reason = $3,
+                    decided_by_id = $4::uuid,
+                    decided_at = NOW()
+                WHERE id = $1::uuid
+                """,
+                finding_id,
+                new_status,
+                decision_reason,
+                decided_by_user_id,
+            )
+        # asyncpg.execute devolve string tipo 'UPDATE 1'
+        return result.endswith(" 1")
+
     async def list_rule_codes_with_findings(self) -> list[str]:
         """rule_codes únicos que têm pelo menos 1 finding (qualquer status).
         Alimenta o dropdown 'Regra' do inbox de alertas."""

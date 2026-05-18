@@ -466,6 +466,89 @@ class PaymentsDashboardService:
             },
         }
 
+    # =========================================================== Detalhe finding (Bloco F)
+
+    # Workflow estados → transições permitidas. Source-of-truth do HITL.
+    # `open` é o estado inicial; `accepted_fp`/`blocked` são terminais.
+    _STATUS_TRANSITIONS = {
+        "open":         ("in_analysis", "escalated", "accepted_fp", "blocked"),
+        "in_analysis":  ("escalated", "accepted_fp", "blocked", "open"),
+        "escalated":    ("accepted_fp", "blocked", "in_analysis"),
+        "accepted_fp":  (),
+        "blocked":      (),
+    }
+
+    async def finding_detail(self, finding_id: str) -> dict[str, Any] | None:
+        """Detalhe enriquecido do finding pra renderizar /alertas/{id}.
+
+        Adiciona campos formatados (BR), label de severity/status, transições
+        de status disponíveis dado o estado atual.
+        """
+        raw = await self.repo.get_finding(finding_id)
+        if raw is None:
+            return None
+        raw["value_at_risk_brl_fmt"] = _fmt_brl(raw["value_at_risk_brl"])
+        raw["delta_pct_fmt"] = (
+            _fmt_pct(raw["delta_pct"], signed=True)
+            if raw["delta_pct"] is not None
+            else "—"
+        )
+        raw["severity_label"] = {
+            "high": "Alerta Op.",
+            "medium": "Alerta Proc.",
+            "low": "St. Atípica",
+        }.get(raw["severity"], raw["severity"])
+        raw["status_label"] = self.STATUS_LABELS.get(raw["status"], raw["status"])
+        raw["detected_at_fmt"] = (
+            raw["detected_at"].strftime("%d/%m/%Y %H:%M") if raw["detected_at"] else "—"
+        )
+        raw["decided_at_fmt"] = (
+            raw["decided_at"].strftime("%d/%m/%Y %H:%M") if raw["decided_at"] else None
+        )
+        raw["run_started_at_fmt"] = (
+            raw["run_started_at"].strftime("%d/%m/%Y %H:%M") if raw["run_started_at"] else "—"
+        )
+        # Transições disponíveis: cada uma vira um botão na UI.
+        transitions = self._STATUS_TRANSITIONS.get(raw["status"], ())
+        raw["available_transitions"] = [
+            {"key": t, "label": self.STATUS_LABELS.get(t, t)}
+            for t in transitions
+        ]
+        raw["is_terminal"] = not bool(transitions)
+        return raw
+
+    async def transition_finding(
+        self,
+        finding_id: str,
+        *,
+        new_status: str,
+        decision_reason: str | None,
+        decided_by_user_id: str | None,
+    ) -> tuple[bool, str | None]:
+        """Tenta mudar status do finding. Valida transição.
+
+        Devolve `(ok, error_message)`:
+          - (True, None) se transition válida e aplicada
+          - (False, motivo) caso contrário (finding inexistente ou transition
+            inválida)
+        """
+        current = await self.repo.get_finding(finding_id)
+        if current is None:
+            return False, "finding não encontrado"
+        allowed = self._STATUS_TRANSITIONS.get(current["status"], ())
+        if new_status not in allowed:
+            return False, (
+                f"transição inválida: {current['status']} → {new_status}. "
+                f"Permitidas: {', '.join(allowed) or '(nenhuma — estado terminal)'}"
+            )
+        ok = await self.repo.update_finding_status(
+            finding_id,
+            new_status=new_status,
+            decision_reason=decision_reason,
+            decided_by_user_id=decided_by_user_id,
+        )
+        return ok, (None if ok else "atualização falhou")
+
     async def filtros_disponiveis(self) -> dict[str, list[Any]]:
         """Catálogo para popular os dropdowns da barra de filtros do
         dashboard: UFs presentes em wf_payment + tipos de alerta fixos.

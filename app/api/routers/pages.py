@@ -612,6 +612,68 @@ async def payments_empreiteiras_wf_alertas_page(
     )
 
 
+@router.get("/payments/empreiteiras-wf/alertas/{finding_id}", response_class=HTMLResponse)
+async def payments_empreiteiras_wf_alerta_detalhe(
+    finding_id: str,
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+):
+    """Detalhe de 1 finding: contexto (regra/contrato/OS) e ações (workflow)."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.dashboard_service import PaymentsDashboardService
+
+    svc = PaymentsDashboardService()
+    finding = await svc.finding_detail(finding_id)
+    if finding is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "alerta não encontrado")
+
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/alerta_detalhe.html",
+        await _ctx(
+            request, user,
+            active_module="empreiteiras_wf",
+            finding=finding,
+        ),
+    )
+
+
+@router.post("/payments/empreiteiras-wf/alertas/{finding_id}/decide")
+async def payments_empreiteiras_wf_alerta_decide(
+    finding_id: str,
+    request: Request,
+    new_status: str = Form(...),
+    decision_reason: str = Form(""),
+    user: User | None = Depends(current_user_optional),
+):
+    """Aplica transição de status no finding (HITL workflow).
+
+    Form-encoded para que `<form method=POST>` funcione sem JS extra.
+    Após decidir, redireciona pro próprio detalhe (PRG pattern — evita
+    repost no F5)."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.dashboard_service import PaymentsDashboardService
+
+    svc = PaymentsDashboardService()
+    ok, error = await svc.transition_finding(
+        finding_id,
+        new_status=new_status,
+        decision_reason=(decision_reason.strip() or None),
+        decided_by_user_id=str(user.id),
+    )
+    if not ok:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, error or "falha na transição")
+    return RedirectResponse(
+        f"/payments/empreiteiras-wf/alertas/{finding_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @router.get("/payments/empreiteiras-wf/fornecedores", response_class=HTMLResponse)
 async def payments_empreiteiras_wf_fornecedores_partial(
     request: Request,

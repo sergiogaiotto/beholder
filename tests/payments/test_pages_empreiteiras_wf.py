@@ -698,6 +698,207 @@ async def test_alertas_route_filter_via_querystring():
 
 
 @pytest.mark.asyncio
+async def test_finding_detail_returns_none_for_unknown_id(_ensure_payments_schema):
+    svc = PaymentsDashboardService()
+    detail = await svc.finding_detail("00000000-0000-0000-0000-000000000000")
+    assert detail is None
+
+
+@pytest.mark.asyncio
+async def test_finding_detail_after_seed():
+    """Detalhe traz JOINs (rule, supplier, run) e campos formatados."""
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    inbox = await svc.inbox_payload(rule_code="REGRA_LPU")
+    finding_id = inbox["findings"]["rows"][0]["id"]
+    detail = await svc.finding_detail(finding_id)
+    assert detail is not None
+    assert detail["rule_code"] == "REGRA_LPU"
+    assert detail["rule_name"] == "LPU compare" or detail["rule_name"]  # seed real
+    assert detail["supplier_nome"] == "ENGEMAN MNT"
+    assert detail["supplier_cnpj"] == "01731483000167"
+    assert detail["value_at_risk_brl_fmt"] == "R$ 1.000,00"
+    assert detail["delta_pct_fmt"] == "+110.0%"
+    assert detail["severity_label"] == "Alerta Op."
+    assert detail["status_label"] == "Aberto"
+    # expected_value / actual_value vêm como dict (JSONB unwrapped).
+    assert detail["expected_value"]["preco_lpu"] == 10.0
+    assert detail["actual_value"]["preco_pago"] == 21.0
+    # Transições disponíveis a partir de 'open'.
+    transitions = {t["key"] for t in detail["available_transitions"]}
+    assert transitions == {"in_analysis", "escalated", "accepted_fp", "blocked"}
+    assert detail["is_terminal"] is False
+
+
+@pytest.mark.asyncio
+async def test_transition_finding_valid_path():
+    """Sequência open → in_analysis → accepted_fp aplicada e refletida."""
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    inbox = await svc.inbox_payload(rule_code="REGRA_LPU")
+    finding_id = inbox["findings"]["rows"][0]["id"]
+
+    user_id = await _create_test_user_id()
+    ok, err = await svc.transition_finding(
+        finding_id, new_status="in_analysis",
+        decision_reason="investigando", decided_by_user_id=user_id,
+    )
+    assert ok and err is None
+
+    refreshed = await svc.finding_detail(finding_id)
+    assert refreshed["status"] == "in_analysis"
+    assert refreshed["status_label"] == "Em Análise"
+    assert refreshed["decision_reason"] == "investigando"
+    assert refreshed["decided_at"] is not None
+
+    # Próxima transição válida.
+    ok2, _ = await svc.transition_finding(
+        finding_id, new_status="accepted_fp",
+        decision_reason="falso positivo confirmado",
+        decided_by_user_id=user_id,
+    )
+    assert ok2
+    terminal = await svc.finding_detail(finding_id)
+    assert terminal["status"] == "accepted_fp"
+    assert terminal["is_terminal"] is True
+    assert terminal["available_transitions"] == []
+
+
+@pytest.mark.asyncio
+async def test_transition_finding_invalid_transition_rejected():
+    """open → blocked direto é permitido; mas accepted_fp → open não (terminal)."""
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    inbox = await svc.inbox_payload(rule_code="REGRA_LPU")
+    finding_id = inbox["findings"]["rows"][0]["id"]
+    user_id = await _create_test_user_id()
+
+    # Direto pra terminal
+    ok, _ = await svc.transition_finding(
+        finding_id, new_status="accepted_fp",
+        decision_reason=None, decided_by_user_id=user_id,
+    )
+    assert ok
+    # Tentar sair do terminal — rejeitado
+    ok2, err = await svc.transition_finding(
+        finding_id, new_status="open",
+        decision_reason=None, decided_by_user_id=user_id,
+    )
+    assert not ok2
+    assert err and "transição inválida" in err
+
+
+@pytest.mark.asyncio
+async def test_transition_finding_unknown_id():
+    svc = PaymentsDashboardService()
+    ok, err = await svc.transition_finding(
+        "00000000-0000-0000-0000-000000000000", new_status="in_analysis",
+        decision_reason=None, decided_by_user_id=None,
+    )
+    assert not ok
+    assert err == "finding não encontrado"
+
+
+@pytest.mark.asyncio
+async def test_alerta_detalhe_route_renders():
+    """Rota GET /alertas/{id}: 200, breadcrumb, formulário decisão visível."""
+    from app.main import app
+
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    inbox = await svc.inbox_payload(rule_code="REGRA_LPU")
+    finding_id = inbox["findings"]["rows"][0]["id"]
+
+    await _create_user("ctrl_detalhe", "senha-teste-123", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ctrl_detalhe", "senha-teste-123")
+        resp = await client.get(f"/payments/empreiteiras-wf/alertas/{finding_id}")
+    assert resp.status_code == 200
+    body = resp.text
+    # Breadcrumb completo
+    assert 'href="/payments/empreiteiras-wf/alertas"' in body
+    # Dados do finding
+    assert "ENGEMAN MNT" in body
+    assert "REGRA_LPU" in body
+    assert "R$ 1.000,00" in body
+    # Formulário decisão visível (não terminal)
+    assert 'action="/payments/empreiteiras-wf/alertas/' in body
+    assert 'name="new_status"' in body
+
+
+@pytest.mark.asyncio
+async def test_alerta_detalhe_route_404_for_unknown():
+    from app.main import app
+
+    await _create_user("ctrl_404", "senha-teste-123", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ctrl_404", "senha-teste-123")
+        resp = await client.get(
+            "/payments/empreiteiras-wf/alertas/00000000-0000-0000-0000-000000000000"
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_alerta_decide_route_applies_transition_and_redirects():
+    """POST /decide: aplica transição, redireciona pro detalhe (303), e ao
+    seguir o redirect mostra o status atualizado."""
+    from app.main import app
+
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    inbox = await svc.inbox_payload(rule_code="REGRA_LPU")
+    finding_id = inbox["findings"]["rows"][0]["id"]
+
+    await _create_user("ctrl_decide", "senha-teste-123", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ctrl_decide", "senha-teste-123")
+        resp = await client.post(
+            f"/payments/empreiteiras-wf/alertas/{finding_id}/decide",
+            data={"new_status": "in_analysis", "decision_reason": "vou olhar"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert finding_id in resp.headers["location"]
+
+        # Segue o redirect; status agora é Em Análise.
+        resp2 = await client.get(resp.headers["location"])
+        assert resp2.status_code == 200
+        assert "Em Análise" in resp2.text
+        assert "vou olhar" in resp2.text
+
+
+@pytest.mark.asyncio
+async def test_alerta_decide_route_rejects_invalid_transition():
+    """POST /decide com transição inválida → 400."""
+    from app.main import app
+
+    await _seed_minimal_dataset()
+    svc = PaymentsDashboardService()
+    inbox = await svc.inbox_payload(rule_code="REGRA_LPU")
+    finding_id = inbox["findings"]["rows"][0]["id"]
+    # Move pra accepted_fp (terminal) primeiro
+    user_id = await _create_test_user_id()
+    await svc.transition_finding(
+        finding_id, new_status="accepted_fp",
+        decision_reason=None, decided_by_user_id=user_id,
+    )
+
+    await _create_user("ctrl_400", "senha-teste-123", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ctrl_400", "senha-teste-123")
+        resp = await client.post(
+            f"/payments/empreiteiras-wf/alertas/{finding_id}/decide",
+            data={"new_status": "open"},
+        )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_alertas_route_requires_role():
     """analista_n3 → 403; sem auth → redirect."""
     from app.main import app
