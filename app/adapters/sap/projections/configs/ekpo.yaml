@@ -1,0 +1,47 @@
+# Projeção do XLSX `EKPO - SAP (Extração pedidos).MHTML.xlsx` (Sheet1)
+# → payments.purchase_order_item (25k + 44.7k rows do GC sheet).
+#
+# Source tem 283 colunas; mapeamos 11 tipadas + raw_extra absorve as outras 272.
+# 'Material' aparece 2x no header — dict-driven mapping pega a última ocorrência.
+# Usamos 'Qtd.do pedido' (não 'Quantidade prevista') — é o quantitativo aprovado.
+
+target_entity: PurchaseOrderItem
+description: EKPO (item de pedido SAP) — 283 cols → 11 tipadas + raw_extra
+
+source:
+  format: xlsx
+  sheet: Sheet1
+
+columns:
+  documento_compras:
+    source: Documento de compras
+    required: true
+  item:
+    source: Item
+    required: true
+  texto_breve:
+    source: Texto breve
+  material:
+    source: Material
+  grupo_mercadorias:
+    source: Grupo de mercadorias
+  quantidade:
+    source: Qtd.do pedido
+    type: decimal
+  unidade_medida:
+    source: UM pedido
+  preco_liquido:
+    source: Preço líq.pedido
+    type: decimal
+  valor_liquido:
+    source: Valor líquido pedido
+    type: decimal
+  centro:
+    source: Centro
+  categoria_item:
+    source: Categoria do item
+
+catchall:
+  field: raw_extra
+  include_unmapped: true
+  exclude_none: true

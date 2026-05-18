@@ -8,6 +8,11 @@ requires-python = ">=3.11"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "acceptance: gate end-to-end com dados reais (~5min). Rodar com -m acceptance.",
+]
+# Skip acceptance por default — força explicitação via -m.
+addopts = "-m 'not acceptance'"
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,39 @@
+# Projeção do XLSX `Contratos - Empreteiras.xlsx` (sheet "Empreiteiras")
+# → payments.supplier_bridge (147 rows iniciais).
+#
+# Headers reais (6 cols): CATEGORIA | EMPREITEIRA | CONTRATO_NUM
+#                       | REF WS | NUMERO_FORNECEDOR SAP | CNPJ
+#
+# Note: CONTRATO_NUM no XLSX → contrato_num_sap no domain (rename intencional
+# para evitar ambiguidade com wf_payment.contrato_num).
+
+target_entity: SupplierBridge
+description: DE-PARA contrato SAP ↔ REF WS ↔ CNPJ (147 rows iniciais)
+
+source:
+  format: xlsx
+  sheet: Empreiteiras
+
+columns:
+  categoria:
+    source: CATEGORIA
+    required: true
+  empreiteira:
+    source: EMPREITEIRA
+    required: true
+  contrato_num_sap:
+    source: CONTRATO_NUM
+    required: true
+  ref_ws:
+    source: REF WS
+    required: true
+  numero_fornecedor_sap:
+    source: NUMERO_FORNECEDOR SAP
+    required: true
+  cnpj:
+    source: CNPJ
+    required: true
+
+load:
+  method: bulk_upsert  # idempotente por (contrato_num_sap, ref_ws)
+  batch_size: 500

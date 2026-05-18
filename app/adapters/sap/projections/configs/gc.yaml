@@ -1,0 +1,54 @@
+# Projeção da sheet "Contratos Guarda Chuvas" do `Contratos - Empreteiras.xlsx`
+# → payments.purchase_order_gc (44.782 rows iniciais).
+#
+# Source tem 13 colunas — cruzamento pré-processado EKPO+ESLL+LPU pros GCs.
+# v1.1: tabela física na Fase 1 (D1 aprovada).
+#
+# 'Texto breve' aparece 2x — o segundo é da linha de serviço (texto_breve_servico),
+# mas dict-driven pega a última. Não há forma trivial em YAML — aceitar limitação
+# (texto_breve_servico fica None até refator no xlsx_stream com header re-numbering).
+
+target_entity: PurchaseOrderGc
+description: Cruzamento EKPO+ESLL+LPU para guarda-chuvas (44.782 rows). R6.6-6.9.
+
+source:
+  format: xlsx
+  sheet: Contratos Guarda Chuvas
+
+columns:
+  documento_compras:
+    source: Documento de compras
+    required: true
+  item:
+    source: Item
+    required: true
+  ult_modif_dia:
+    source: Últ.modif.no dia
+    type: date
+  texto_breve:
+    source: Texto breve
+  empresa:
+    source: Empresa
+  numero_pacote_ekpo:
+    source: Nº pacote (EKPO)
+  pacote_esll:
+    source: Pacote (ESLL)
+  inicio_validade:
+    source: Início per.validade
+    type: date
+  fim_validade:
+    source: Fim da validade
+    type: date
+  val_fix_cab:
+    source: ValFix.(nível cab.)
+    type: decimal
+  preco_bruto_lpu:
+    source: Preço bruto (LPU)
+    type: decimal
+  numero_servico:
+    source: Nº de serviço
+
+catchall:
+  field: raw_extra
+  include_unmapped: true
+  exclude_none: true
