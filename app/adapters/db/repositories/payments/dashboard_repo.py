@@ -1,0 +1,199 @@
+"""Repo de leitura para o Dashboard Empreiteiras-WF (Fase 3 Bloco B).
+
+Concentra as 9 queries dos KPIs do print 2 + auxiliares para charts (Bloco C)
+e tabela de fornecedores (Bloco D). Apenas leitura — não escreve. Usa o pool
+dedicado `payments` (vide memory/payments_pool_quirks.md).
+
+Convenção retorno: cada método devolve `dict` simples (chaves primitivas),
+sem domain models. O `PaymentsDashboardService` formata para o template.
+Valores numéricos vêm `Decimal` (asyncpg) ou `int` — o caller converte.
+
+Filtro universal (SDD §9 v1.1.1 prefácio) — alinhado com `_base.py` do
+rules engine. Mantido aqui via helper para que mudança futura propague:
+
+  status_os IN ('EXECUTADO', 'EM EXECUÇÃO')
+  AND nivel_gerencial IN ('Em Pagamento', 'Medido')
+  AND malogro <> 'ERROR'
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+from typing import Any
+
+from app.adapters.db.postgres_payments import connect_payments
+
+
+# Filtro universal — duplicado do rules engine (_base.py:_UNIVERSE_FILTER_SQL)
+# de propósito, para o dashboard não depender do módulo de regras. Sincronize
+# os dois quando ajustar.
+_UNIVERSE_FILTER_SQL = """
+    status_os IN ('EXECUTADO', 'EM EXECUÇÃO')
+    AND nivel_gerencial IN ('Em Pagamento', 'Medido')
+    AND malogro <> 'ERROR'
+"""
+
+# Findings considerados "abertos" para fins de KPI — exclui aceitos como FP
+# e bloqueados. Workflow segue migration 005 (CHECK status IN ...).
+_OPEN_STATUSES = ("open", "in_analysis", "escalated")
+
+
+class PaymentsDashboardRepository:
+    """Queries somente-leitura para o dashboard. Stateless."""
+
+    # ---------------------------------------------------------------- KPI 1+2
+    async def kpi_contratos(self) -> dict[str, int]:
+        """Contratos monitorados vs não monitorados + fornecedores únicos
+        monitorados (alimenta o KPI 'CONTRATOS MONITORADOS' e o resumo
+        executivo do header)."""
+        async with connect_payments() as c:
+            row = await c.fetchrow(
+                """
+                SELECT
+                    COUNT(*) FILTER (WHERE is_monitored)                 AS monitorados,
+                    COUNT(*) FILTER (WHERE NOT is_monitored)             AS nao_monitorados,
+                    COUNT(DISTINCT supplier_bridge_id) FILTER (WHERE is_monitored)
+                                                                         AS fornecedores
+                FROM payments.contract_master
+                """
+            )
+            return {
+                "monitorados": int(row["monitorados"] or 0),
+                "nao_monitorados": int(row["nao_monitorados"] or 0),
+                "fornecedores": int(row["fornecedores"] or 0),
+            }
+
+    # -------------------------------------------------------------------- KPI 3
+    async def kpi_os(self) -> dict[str, int]:
+        """OS distintas dentro do universo de regras + fornecedores únicos
+        que aparecem nessas OS."""
+        async with connect_payments() as c:
+            row = await c.fetchrow(
+                f"""
+                SELECT
+                    COUNT(DISTINCT os_num)         AS os_count,
+                    COUNT(DISTINCT empreiteira)    AS fornecedores
+                FROM payments.wf_payment
+                WHERE {_UNIVERSE_FILTER_SQL}
+                """
+            )
+            return {
+                "os_count": int(row["os_count"] or 0),
+                "fornecedores": int(row["fornecedores"] or 0),
+            }
+
+    # -------------------------------------------------------------------- KPI 4
+    async def kpi_alertas_resumo(self) -> dict[str, Any]:
+        """Total de findings abertos + risco financeiro somado + total
+        analisado (universo wf_payment). Agrega tudo numa única round-trip
+        ao pool para reduzir latência."""
+        async with connect_payments() as c:
+            row_findings = await c.fetchrow(
+                """
+                SELECT
+                    COUNT(*)                                             AS total,
+                    COALESCE(SUM(value_at_risk_brl), 0)::numeric         AS risco_brl
+                FROM payments.reconciliation_finding
+                WHERE status = ANY($1::text[])
+                """,
+                list(_OPEN_STATUSES),
+            )
+            row_universe = await c.fetchrow(
+                f"""
+                SELECT COALESCE(SUM(valor_total_final), 0)::numeric AS total_brl
+                FROM payments.wf_payment
+                WHERE {_UNIVERSE_FILTER_SQL}
+                """
+            )
+            return {
+                "total": int(row_findings["total"] or 0),
+                "risco_brl": Decimal(row_findings["risco_brl"] or 0),
+                "total_analisado_brl": Decimal(row_universe["total_brl"] or 0),
+            }
+
+    # -------------------------------------------------------------------- KPI 5+6
+    async def kpi_lpu_resumo(self) -> dict[str, Any]:
+        """Comparativo LPU = soma dos value_at_risk_brl de findings das
+        regras R3 (texto/preço) e LPU (preço pago > LPU). Δ médio é a média
+        do delta_pct dessas regras."""
+        async with connect_payments() as c:
+            row = await c.fetchrow(
+                """
+                SELECT
+                    COALESCE(SUM(value_at_risk_brl), 0)::numeric  AS total_brl,
+                    AVG(delta_pct)                                AS delta_pct_avg
+                FROM payments.reconciliation_finding
+                WHERE rule_code IN ('REGRA_3', 'REGRA_LPU')
+                  AND status = ANY($1::text[])
+                """,
+                list(_OPEN_STATUSES),
+            )
+            avg = row["delta_pct_avg"]
+            return {
+                "total_brl": Decimal(row["total_brl"] or 0),
+                "delta_pct_avg": float(avg) if avg is not None else None,
+            }
+
+    # -------------------------------------------------------------------- KPI 7
+    async def kpi_recorrencia(self) -> dict[str, int]:
+        """Fornecedores com >3 findings abertos / total fornecedores
+        monitorados. Retorna os dois números; service divide."""
+        async with connect_payments() as c:
+            recorrentes = await c.fetchval(
+                """
+                SELECT COUNT(*) FROM (
+                    SELECT supplier_id
+                    FROM payments.reconciliation_finding
+                    WHERE status = ANY($1::text[]) AND supplier_id IS NOT NULL
+                    GROUP BY supplier_id
+                    HAVING COUNT(*) > 3
+                ) sub
+                """,
+                list(_OPEN_STATUSES),
+            )
+            total_monitorados = await c.fetchval(
+                """
+                SELECT COUNT(DISTINCT supplier_bridge_id)
+                FROM payments.contract_master
+                WHERE is_monitored
+                """
+            )
+            return {
+                "recorrentes": int(recorrentes or 0),
+                "total_monitorados": int(total_monitorados or 0),
+            }
+
+    # -------------------------------------------------------------------- KPI 8
+    async def kpi_tempo_deteccao(self) -> dict[str, float | None]:
+        """Tempo médio (em dias) entre data_pedido do pagamento e a
+        detecção do finding. NULL se não houver findings com
+        wf_payment_data_pedido populado."""
+        async with connect_payments() as c:
+            avg_days = await c.fetchval(
+                """
+                SELECT AVG(
+                    EXTRACT(EPOCH FROM (detected_at - wf_payment_data_pedido::timestamp))
+                    / 86400.0
+                )
+                FROM payments.reconciliation_finding
+                WHERE wf_payment_data_pedido IS NOT NULL
+                """
+            )
+            return {"avg_dias": float(avg_days) if avg_days is not None else None}
+
+    # -------------------------------------------------------------------- KPI 9
+    async def kpi_acuracidade(self) -> dict[str, int]:
+        """Conta regras únicas que rodaram com sucesso (apareceram em
+        reconciliation_run.rules_executed onde status='completed').
+        O denominador (target) é fixo no service — vide TOTAL_RULES_TARGET."""
+        async with connect_payments() as c:
+            executed_ok = await c.fetchval(
+                """
+                SELECT COUNT(DISTINCT unnested) FROM (
+                    SELECT UNNEST(rules_executed) AS unnested
+                    FROM payments.reconciliation_run
+                    WHERE status = 'completed'
+                ) sub
+                """
+            )
+            return {"executed_ok": int(executed_ok or 0)}
