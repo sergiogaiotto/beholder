@@ -17,7 +17,7 @@ import asyncpg
 import pytest
 
 
-_DEFAULT_TEST_DSN = "postgresql://beholder:beholder@localhost:5432/beholder_test"
+_DEFAULT_TEST_DSN = "postgresql://beholder:beholder@127.0.0.1:5432/beholder_test"
 
 
 def _test_base_dsn() -> str:
