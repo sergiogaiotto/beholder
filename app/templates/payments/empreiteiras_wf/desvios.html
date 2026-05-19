@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Desvios — Empreiteiras WF{% endblock %}
+
+{#
+  Inbox de desvios R7 (Fase 2.5.1).
+
+  Espelha o layout de `alertas.html` (Fase 3 Bloco E) mas opera sobre
+  payments.analytic_finding (engine R7 da Fase 2.5). Colunas distintas:
+  Detector, Score, Range esperado vs Valor observado — semântica
+  estatística em vez de regra determinística.
+#}
+
+{% block content %}
+<div class="bg-brand-700 text-white">
+  <div class="px-6 py-4 flex items-center justify-between flex-wrap gap-3">
+    <div>
+      <div class="text-[11px] opacity-70 mb-0.5">
+        <a href="/payments/empreiteiras-wf" class="hover:underline">Empreiteiras WF</a>
+        <span class="mx-1.5">›</span>
+        Desvios
+      </div>
+      <h1 class="text-xl font-semibold tracking-tight">Inbox de Desvios (R7)</h1>
+    </div>
+    <div class="text-sm opacity-80">
+      <span class="font-semibold">{{ inbox.findings.total }}</span> desvio(s)
+      {% if inbox.active_filters.search or inbox.active_filters.severity
+            or inbox.active_filters.detector_code or inbox.active_filters.status %}
+        <span class="opacity-70">(filtrados)</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="px-6 py-5 pb-12 max-w-full">
+
+  <!-- Filtros -->
+  <form method="GET" class="bg-white border border-neutral-200 rounded-lg p-3 mb-4
+                             flex items-end gap-3 flex-wrap">
+    <div class="flex-1 min-w-[200px]">
+      <label class="text-[10px] uppercase tracking-wider text-neutral-500">Buscar</label>
+      <input name="search" type="text" value="{{ inbox.active_filters.search }}"
+             placeholder="código do detector…"
+             class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600" />
+    </div>
+    <div class="min-w-[160px]">
+      <label class="text-[10px] uppercase tracking-wider text-neutral-500">Severidade</label>
+      <select name="severity" class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600">
+        <option value="">Todas</option>
+        {% for key, label in inbox.filtros.severity_options %}
+          <option value="{{ key }}" {% if inbox.active_filters.severity == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="min-w-[200px]">
+      <label class="text-[10px] uppercase tracking-wider text-neutral-500">Detector</label>
+      <select name="detector_code" class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600">
+        <option value="">Todos</option>
+        {% for code in inbox.filtros.detector_codes %}
+          <option value="{{ code }}" {% if inbox.active_filters.detector_code == code %}selected{% endif %}>{{ code }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="min-w-[160px]">
+      <label class="text-[10px] uppercase tracking-wider text-neutral-500">Status</label>
+      <select name="status" class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600">
+        <option value="">Abertos</option>
+        <option value="all" {% if inbox.active_filters.status == 'all' %}selected{% endif %}>Todos</option>
+        {% for key, label in inbox.filtros.statuses %}
+          <option value="{{ key }}" {% if inbox.active_filters.status == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit"
+            class="px-4 py-2 rounded bg-brand-600 text-white text-sm hover:bg-brand-700">
+      Filtrar
+    </button>
+    <a href="/payments/empreiteiras-wf/desvios"
+       class="px-4 py-2 rounded border border-neutral-300 text-sm text-neutral-700 hover:bg-neutral-50">
+      Limpar
+    </a>
+  </form>
+
+  <!-- Tabela -->
+  <section class="bg-white border border-neutral-200 rounded-lg overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="text-[11px] uppercase tracking-wider text-neutral-500 bg-neutral-50">
+        <tr>
+          <th class="text-left py-2 px-3 font-medium">Detectado</th>
+          <th class="text-left py-2 px-3 font-medium">Detector</th>
+          <th class="text-left py-2 px-3 font-medium">Severidade</th>
+          <th class="text-left py-2 px-3 font-medium">Fornecedor</th>
+          <th class="text-right py-2 px-3 font-medium">Score</th>
+          <th class="text-left py-2 px-3 font-medium">Status</th>
+          <th class="py-2 px-3"></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for f in inbox.findings.rows %}
+        {% set sev_class = {'high':'bg-risk-50 text-risk-800', 'medium':'bg-amber-50 text-amber-800', 'low':'bg-neutral-100 text-neutral-700'}.get(f.severity, 'bg-neutral-100 text-neutral-700') %}
+        {% set st_class  = {'open':'bg-brand-50 text-brand-800', 'in_analysis':'bg-ai-50 text-ai-800', 'escalated':'bg-amber-50 text-amber-800', 'accepted_fp':'bg-neutral-100 text-neutral-600', 'blocked':'bg-risk-50 text-risk-800'}.get(f.status, 'bg-neutral-100 text-neutral-700') %}
+        <tr class="border-t border-neutral-100 hover:bg-neutral-50/50">
+          <td class="py-2 px-3 text-neutral-600 font-mono text-xs">{{ f.detected_at_fmt }}</td>
+          <td class="py-2 px-3 font-mono text-xs">{{ f.detector_code }}</td>
+          <td class="py-2 px-3">
+            <span class="text-[10px] px-1.5 py-0.5 rounded {{ sev_class }}">{{ f.severity_label }}</span>
+          </td>
+          <td class="py-2 px-3 font-medium">{{ f.supplier_nome }}</td>
+          <td class="py-2 px-3 text-right font-mono">{{ f.score_fmt }}</td>
+          <td class="py-2 px-3">
+            <span class="text-[10px] px-1.5 py-0.5 rounded {{ st_class }}">{{ f.status_label }}</span>
+          </td>
+          <td class="py-2 px-3 text-right">
+            <a href="/payments/empreiteiras-wf/desvios/{{ f.id }}"
+               class="text-[11px] text-brand-700 hover:underline whitespace-nowrap">
+              Ver detalhe →
+            </a>
+          </td>
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="7" class="text-center py-10 text-neutral-400 italic">
+            nenhum desvio com esses filtros — engine R7 ainda não rodou ou
+            todos os achados foram resolvidos
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+
+    {% if inbox.findings.pages > 1 %}
+      {% set p = inbox.findings.page %}
+      {% set total = inbox.findings.total %}
+      {% set per = inbox.findings.per_page %}
+      {% set first = (p - 1) * per + 1 %}
+      {% set last  = ([p * per, total] | min) %}
+      <div class="flex items-center justify-between px-3 py-2 border-t border-neutral-100 text-xs text-neutral-600">
+        <div>{{ first }}–{{ last }} de {{ total }}</div>
+        <div class="flex items-center gap-1">
+          {% set qs = "?" + request.url.query | replace("page=" + (p|string), "") | replace("&&", "&") %}
+          {% set qs = qs if qs.endswith("?") or qs.endswith("&") else qs + "&" %}
+          {% if p > 1 %}
+            <a href="{{ qs }}page={{ p - 1 }}" class="px-2 py-1 rounded border border-neutral-200 hover:bg-neutral-50">← Anterior</a>
+          {% else %}
+            <span class="px-2 py-1 rounded border border-neutral-100 text-neutral-300">← Anterior</span>
+          {% endif %}
+          <span class="px-2 py-1 text-neutral-500">página {{ p }} / {{ inbox.findings.pages }}</span>
+          {% if p < inbox.findings.pages %}
+            <a href="{{ qs }}page={{ p + 1 }}" class="px-2 py-1 rounded border border-neutral-200 hover:bg-neutral-50">Próxima →</a>
+          {% else %}
+            <span class="px-2 py-1 rounded border border-neutral-100 text-neutral-300">Próxima →</span>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+  </section>
+
+</div>
+{% endblock %}
