@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Extração de Contratos — Empreiteiras WF{% endblock %}
+
+{#
+  Tela de extração de PDFs de contrato (Fase 4).
+
+  Layout:
+    1. Header vermelho com breadcrumb + título
+    2. Banner PRG quando just_uploaded está no querystring
+    3. Card de upload (single PDF, multipart form direto)
+    4. Tabela de jobs recentes (auto-poll quando há pending/extracting)
+#}
+
+{% block content %}
+<div class="bg-brand-700 text-white">
+  <div class="px-6 py-4">
+    <div class="text-[11px] opacity-70 mb-0.5">
+      <a href="/payments/empreiteiras-wf" class="hover:underline">Empreiteiras WF</a>
+      <span class="mx-1.5">›</span>
+      Extração de Contratos
+    </div>
+    <h1 class="text-xl font-semibold tracking-tight">Extração de PDFs de Contrato</h1>
+    <p class="text-sm opacity-80 mt-1">
+      Upload de PDF → pipeline extrai folha de rosto + LPU items via Maritaca
+      sabia-4. Resultado entra em revisão humana (HITL) antes de virar
+      ContractVersion.
+    </p>
+  </div>
+</div>
+
+<div class="px-6 py-5 pb-12 max-w-full">
+  {% if request.query_params.get("just_uploaded") %}
+    <div class="mb-4 bg-brand-50 border border-brand-200 rounded-lg p-3 text-xs text-brand-800 flex items-center gap-2">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12 L11 15 L16 9"/></svg>
+      <span>
+        Upload enfileirado — job <span class="font-mono">{{ request.query_params.get("just_uploaded")[:8] }}</span>
+        está sendo extraído no worker. A tabela abaixo atualiza sozinha.
+      </span>
+    </div>
+  {% endif %}
+
+  <section class="mb-6 bg-white border border-neutral-200 rounded-lg p-4">
+    <header class="mb-3">
+      <h2 class="text-sm font-medium">Novo contrato</h2>
+      <p class="text-[11px] text-neutral-500">
+        Apenas PDFs. Pré-C validou pipeline em 5 contratos reais
+        (R$ 0,37/PDF, 86% campos preenchidos automaticamente).
+      </p>
+    </header>
+    <form method="POST"
+          action="/payments/empreiteiras-wf/contratos/extracao/upload"
+          enctype="multipart/form-data"
+          class="flex items-end gap-3 flex-wrap">
+      <label class="flex-1 min-w-[280px]">
+        <span class="text-[10px] uppercase tracking-wider text-neutral-500">Arquivo PDF</span>
+        <input type="file" name="file" required accept=".pdf"
+               class="block w-full mt-1 text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded file:border file:border-neutral-300 file:bg-neutral-50 file:text-neutral-700 hover:file:bg-neutral-100 file:cursor-pointer" />
+      </label>
+      <button type="submit"
+              class="px-4 py-2 rounded bg-brand-600 text-white text-sm hover:bg-brand-700 inline-flex items-center gap-1.5">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 V14 M7 9 L12 4 L17 9 M5 20 H19"/></svg>
+        Enviar p/ extração
+      </button>
+    </form>
+  </section>
+
+  <section class="bg-white border border-neutral-200 rounded-lg overflow-hidden">
+    <header class="px-4 py-3 border-b border-neutral-100 flex items-center justify-between">
+      <div>
+        <h2 class="text-sm font-medium">Histórico de extrações</h2>
+        <p class="text-[11px] text-neutral-500">
+          Atualiza automaticamente enquanto houver jobs em pending/extracting.
+        </p>
+      </div>
+      <button type="button"
+              hx-get="/payments/empreiteiras-wf/contratos/extracao/jobs"
+              hx-target="#extracao-jobs"
+              hx-swap="outerHTML"
+              class="text-[11px] px-2 py-1 rounded border border-neutral-200 hover:bg-neutral-50">
+        Atualizar
+      </button>
+    </header>
+
+    {% include "payments/empreiteiras_wf/_extracao_jobs.html" %}
+  </section>
+
+</div>
+{% endblock %}

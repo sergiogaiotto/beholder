@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}Revisar Extração — Empreiteiras WF{% endblock %}
+
+{#
+  Detalhe HITL de 1 extraction_job (Fase 4 Bloco B).
+
+  Layout:
+    1. Header vermelho com breadcrumb
+    2. Status banner (review/approved/failed)
+    3. Form 2-col com campos extraídos editáveis (status='review' apenas)
+    4. Botões Aprovar (POST /approve) + Rejeitar (POST /reject)
+    5. Quando aprovado/rejeitado, mostra read-only + histórico.
+#}
+
+{% block content %}
+<div class="bg-brand-700 text-white">
+  <div class="px-6 py-4">
+    <div class="text-[11px] opacity-70 mb-0.5">
+      <a href="/payments/empreiteiras-wf" class="hover:underline">Empreiteiras WF</a>
+      <span class="mx-1.5">›</span>
+      <a href="/payments/empreiteiras-wf/contratos/extracao" class="hover:underline">Extração</a>
+      <span class="mx-1.5">›</span>
+      {{ job.id[:8] }}
+    </div>
+    <h1 class="text-xl font-semibold tracking-tight">{{ job.pdf_filename }}</h1>
+    <p class="text-sm opacity-80 mt-1">
+      Modelo: <span class="font-mono">{{ job.llm_model_used or "—" }}</span> ·
+      Custo: <span class="font-mono">R$ {{ "%.4f"|format(job.cost_brl) }}</span> ·
+      Uploaded por: <span class="font-medium">{{ job.uploaded_by_username }}</span>
+    </p>
+  </div>
+</div>
+
+<div class="px-6 py-5 pb-12 max-w-full">
+
+  {% if job.status == "failed" %}
+    <div class="mb-4 bg-risk-50 border border-risk-200 rounded-lg p-3 text-xs text-risk-800">
+      <strong>Job falhou.</strong> {{ job.error_message or "(sem detalhes)" }}
+    </div>
+  {% elif job.status == "approved" %}
+    <div class="mb-4 bg-brand-50 border border-brand-200 rounded-lg p-3 text-xs text-brand-800">
+      <strong>Job aprovado.</strong> ContractMaster + ContractVersion materializados.
+    </div>
+  {% elif job.status in ("pending", "extracting") %}
+    <div class="mb-4 bg-ai-50 border border-ai-200 rounded-lg p-3 text-xs text-ai-800">
+      Pipeline ainda processando — recarregue a página em alguns segundos.
+    </div>
+  {% endif %}
+
+  {% set fields = job.extracted_fields or {} %}
+  {% set conf = job.confidence_per_field or {} %}
+  {% set editable = job.status == "review" %}
+
+  <form method="POST"
+        action="/payments/empreiteiras-wf/contratos/extracao/{{ job.id }}/approve"
+        class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+
+    <!-- Coluna esquerda: identificação + escopo -->
+    <section class="bg-white border border-neutral-200 rounded-lg p-4 space-y-3">
+      <h2 class="text-sm font-medium mb-2">Identificação</h2>
+
+      {% set field_pairs = [
+        ('empreiteira_nome', 'Empreiteira (razão social)', 'text'),
+        ('empreiteira_cnpj', 'Empreiteira CNPJ', 'text'),
+        ('contratante_cnpj', 'Contratante CNPJ (Claro)', 'text'),
+        ('categoria', 'Categoria', 'text'),
+        ('tecnologia', 'Tecnologia', 'text'),
+        ('atividade', 'Atividade', 'text'),
+      ] %}
+      {% for name, label, kind in field_pairs %}
+        <label class="block">
+          <span class="text-[10px] uppercase tracking-wider text-neutral-500 flex items-center gap-1">
+            {{ label }}
+            {% if conf.get(name) == 0.0 %}
+              <span class="text-amber-700">⚠ vazio</span>
+            {% endif %}
+          </span>
+          <input type="{{ kind }}" name="{{ name }}"
+                 value="{{ fields.get(name) or '' }}"
+                 {% if not editable %}readonly{% endif %}
+                 class="w-full mt-1 px-3 py-1.5 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600 {% if not editable %}bg-neutral-50{% endif %}" />
+        </label>
+      {% endfor %}
+
+      <label class="block">
+        <span class="text-[10px] uppercase tracking-wider text-neutral-500">Objeto do contrato</span>
+        <textarea name="objeto_contrato" rows="3"
+                  {% if not editable %}readonly{% endif %}
+                  class="w-full mt-1 px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600 {% if not editable %}bg-neutral-50{% endif %}">{{ fields.get("objeto_contrato") or "" }}</textarea>
+      </label>
+    </section>
+
+    <!-- Coluna direita: financeiro + datas + LPU -->
+    <section class="bg-white border border-neutral-200 rounded-lg p-4 space-y-3">
+      <h2 class="text-sm font-medium mb-2">Financeiro & validade</h2>
+
+      <label class="block">
+        <span class="text-[10px] uppercase tracking-wider text-neutral-500">Valor fixo cabeçalho (R$)</span>
+        <input type="text" name="val_fix_cab"
+               value="{{ fields.get('val_fix_cab') or '' }}"
+               {% if not editable %}readonly{% endif %}
+               class="w-full mt-1 px-3 py-1.5 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600 font-mono {% if not editable %}bg-neutral-50{% endif %}" />
+      </label>
+
+      <div class="grid grid-cols-2 gap-3">
+        <label class="block">
+          <span class="text-[10px] uppercase tracking-wider text-neutral-500">Início validade</span>
+          <input type="date" name="valid_from"
+                 value="{{ fields.get('valid_from') or '' }}"
+                 {% if not editable %}readonly{% endif %}
+                 class="w-full mt-1 px-3 py-1.5 text-sm border border-neutral-200 rounded {% if not editable %}bg-neutral-50{% endif %}" />
+        </label>
+        <label class="block">
+          <span class="text-[10px] uppercase tracking-wider text-neutral-500">Fim validade</span>
+          <input type="date" name="valid_to"
+                 value="{{ fields.get('valid_to') or '' }}"
+                 {% if not editable %}readonly{% endif %}
+                 class="w-full mt-1 px-3 py-1.5 text-sm border border-neutral-200 rounded {% if not editable %}bg-neutral-50{% endif %}" />
+        </label>
+      </div>
+
+      <label class="block">
+        <span class="text-[10px] uppercase tracking-wider text-neutral-500">UFs (separadas por vírgula)</span>
+        <input type="text" name="uf"
+               value="{{ (fields.get('uf') or []) | join(', ') }}"
+               {% if not editable %}readonly{% endif %}
+               placeholder="ex: SP, RJ, MG"
+               class="w-full mt-1 px-3 py-1.5 text-sm border border-neutral-200 rounded {% if not editable %}bg-neutral-50{% endif %}" />
+      </label>
+
+      <label class="block">
+        <span class="text-[10px] uppercase tracking-wider text-neutral-500">Cidades (separadas por vírgula)</span>
+        <input type="text" name="cidade"
+               value="{{ (fields.get('cidade') or []) | join(', ') }}"
+               {% if not editable %}readonly{% endif %}
+               placeholder="ex: São Paulo, Rio de Janeiro"
+               class="w-full mt-1 px-3 py-1.5 text-sm border border-neutral-200 rounded {% if not editable %}bg-neutral-50{% endif %}" />
+      </label>
+
+      {% if fields.get("lpu_items") %}
+        <div class="mt-3 pt-3 border-t border-neutral-100">
+          <div class="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">
+            LPU items extraídos ({{ fields.lpu_items | length }})
+          </div>
+          <div class="max-h-40 overflow-y-auto text-[11px] font-mono">
+            <table class="w-full">
+              <thead class="text-neutral-400">
+                <tr><th class="text-left">N°</th><th class="text-left pl-2">Descrição</th><th class="text-right">Preço</th></tr>
+              </thead>
+              <tbody>
+                {% for item in fields.lpu_items %}
+                  <tr class="border-t border-neutral-50">
+                    <td>{{ item.numero_servico }}</td>
+                    <td class="pl-2 truncate max-w-[200px]" title="{{ item.descricao }}">{{ item.descricao }}</td>
+                    <td class="text-right">R$ {{ item.preco_unitario }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% endif %}
+    </section>
+
+    <!-- Botões -->
+    {% if editable %}
+      <div class="lg:col-span-2 flex items-center gap-3 justify-end">
+        <button type="submit"
+                class="px-6 py-2 rounded bg-brand-600 text-white text-sm hover:bg-brand-700">
+          ✓ Aprovar e materializar contrato
+        </button>
+      </div>
+    {% endif %}
+  </form>
+
+  <!-- Form de rejeição (separado pra não conflitar com approve) -->
+  {% if editable %}
+    <form method="POST"
+          action="/payments/empreiteiras-wf/contratos/extracao/{{ job.id }}/reject"
+          class="bg-white border border-neutral-200 rounded-lg p-4 mt-3">
+      <h3 class="text-sm font-medium mb-2 text-neutral-700">Rejeitar extração</h3>
+      <p class="text-[11px] text-neutral-500 mb-2">
+        Use quando o PDF está corrompido, é o contrato errado, ou Maritaca
+        falhou em extrair os campos essenciais.
+      </p>
+      <textarea name="reason" rows="2" placeholder="motivo da rejeição (opcional)…"
+                class="w-full px-3 py-2 text-sm border border-neutral-200 rounded outline-none focus:border-brand-600 font-mono"></textarea>
+      <button type="submit"
+              class="mt-2 px-4 py-1.5 rounded border border-risk-300 text-risk-800 text-sm hover:bg-risk-50">
+        × Rejeitar
+      </button>
+    </form>
+  {% endif %}
+
+  <a href="/payments/empreiteiras-wf/contratos/extracao"
+     class="block text-center text-[11px] text-neutral-500 hover:text-brand-700 hover:underline mt-4">
+    ← Voltar para a lista
+  </a>
+
+</div>
+{% endblock %}
