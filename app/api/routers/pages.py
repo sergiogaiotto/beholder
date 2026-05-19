@@ -984,6 +984,108 @@ async def payments_empreiteiras_wf_ingestao_run_status(
     return JSONResponse(run_jsonable)
 
 
+@router.get("/payments/empreiteiras-wf/desvios", response_class=HTMLResponse)
+async def payments_empreiteiras_wf_desvios_page(
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+    severity: str | None = None,
+    detector_code: str | None = None,
+    status: str | None = None,
+    search: str | None = None,
+    page: int = 1,
+):
+    """Inbox /desvios — lista paginada de analytic_finding (R7).
+
+    Mesma matriz de acesso do dashboard. Severity vem como código interno
+    ('high'/'medium'/'low') no querystring; labels são resolvidos no
+    service via _SEVERITY_LABELS_DESVIOS.
+    """
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.dashboard_service import PaymentsDashboardService
+
+    svc = PaymentsDashboardService()
+    inbox = await svc.desvios_payload(
+        severity=severity or None,
+        detector_code=detector_code or None,
+        status=status or None,
+        search=search or None,
+        page=max(1, page),
+    )
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/desvios.html",
+        await _ctx(
+            request, user,
+            active_module="empreiteiras_wf_desvios",
+            inbox=inbox,
+        ),
+    )
+
+
+@router.get("/payments/empreiteiras-wf/desvios/{finding_id}", response_class=HTMLResponse)
+async def payments_empreiteiras_wf_desvio_detalhe(
+    finding_id: str,
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+):
+    """Detalhe de 1 analytic_finding: contexto (detector/score/range) +
+    workflow HITL."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.dashboard_service import PaymentsDashboardService
+
+    svc = PaymentsDashboardService()
+    desvio = await svc.desvio_detail(finding_id)
+    if desvio is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "desvio não encontrado")
+
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/desvio_detalhe.html",
+        await _ctx(
+            request, user,
+            active_module="empreiteiras_wf_desvios",
+            desvio=desvio,
+        ),
+    )
+
+
+@router.post("/payments/empreiteiras-wf/desvios/{finding_id}/decide")
+async def payments_empreiteiras_wf_desvio_decide(
+    finding_id: str,
+    request: Request,
+    new_status: str = Form(...),
+    decision_reason: str = Form(""),
+    user: User | None = Depends(current_user_optional),
+):
+    """Aplica transição de status no analytic_finding (HITL R7).
+
+    Form-encoded + 303 redirect — segue PRG pattern do /alertas/decide.
+    """
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.dashboard_service import PaymentsDashboardService
+
+    svc = PaymentsDashboardService()
+    ok, error = await svc.transition_desvio(
+        finding_id,
+        new_status=new_status,
+        decision_reason=(decision_reason.strip() or None),
+        decided_by_user_id=str(user.id),
+    )
+    if not ok:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, error or "falha na transição")
+    return RedirectResponse(
+        f"/payments/empreiteiras-wf/desvios/{finding_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @router.get("/payments/empreiteiras-wf/alertas/{finding_id}", response_class=HTMLResponse)
 async def payments_empreiteiras_wf_alerta_detalhe(
     finding_id: str,

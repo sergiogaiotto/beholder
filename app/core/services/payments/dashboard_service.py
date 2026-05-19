@@ -466,6 +466,136 @@ class PaymentsDashboardService:
             },
         }
 
+    # =========================================================== Desvios R7 (Fase 2.5.1)
+
+    _SEVERITY_LABELS_DESVIOS = {
+        "high": "Crítico",
+        "medium": "Médio",
+        "low": "Atenção",
+    }
+
+    async def desvios_payload(
+        self,
+        *,
+        severity: str | None = None,
+        detector_code: str | None = None,
+        status: str | None = None,
+        search: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict[str, Any]:
+        """Payload do template `desvios.html` — inbox de analytic_finding.
+
+        Mesma estratégia do `inbox_payload` (reconciliation_finding), mas
+        sobre `payments.analytic_finding`. Severity ganha labels específicos
+        ('Crítico'/'Médio'/'Atenção') pra diferenciar de Alerta Op./Proc.
+        do dashboard, mantendo a UX distinguível para a controladoria.
+        """
+        if status == "all":
+            status_in = tuple(self.STATUS_LABELS.keys())
+        elif status:
+            status_in = (status,)
+        else:
+            status_in = None
+
+        findings_page, detector_codes = await asyncio.gather(
+            self.repo.list_analytic_findings(
+                severity=severity,
+                detector_code=detector_code,
+                status_in=status_in,
+                search=search,
+                page=page,
+                per_page=per_page,
+            ),
+            self.repo.list_detector_codes_with_findings(),
+        )
+
+        for item in findings_page["rows"]:
+            item["severity_label"] = self._SEVERITY_LABELS_DESVIOS.get(
+                item["severity"], item["severity"]
+            )
+            item["status_label"] = self.STATUS_LABELS.get(
+                item["status"], item["status"]
+            )
+            item["detected_at_fmt"] = (
+                item["detected_at"].strftime("%d/%m/%Y %H:%M")
+                if item["detected_at"]
+                else "—"
+            )
+            item["score_fmt"] = (
+                f"{item['score']:+.2f}" if item["score"] is not None else "—"
+            )
+
+        return {
+            "findings": findings_page,
+            "filtros": {
+                "detector_codes": detector_codes,
+                "severity_options": [
+                    (k, v) for k, v in self._SEVERITY_LABELS_DESVIOS.items()
+                ],
+                "statuses": list(self.STATUS_LABELS.items()),
+            },
+            "active_filters": {
+                "severity": severity or "",
+                "detector_code": detector_code or "",
+                "status": status or "",
+                "search": search or "",
+            },
+        }
+
+    async def desvio_detail(self, finding_id: str) -> dict[str, Any] | None:
+        """Detalhe enriquecido de 1 analytic_finding pra template /desvios/{id}.
+        Reusa `_STATUS_TRANSITIONS` (mesmo workflow do reconciliation_finding)."""
+        raw = await self.repo.get_analytic_finding(finding_id)
+        if raw is None:
+            return None
+        raw["severity_label"] = self._SEVERITY_LABELS_DESVIOS.get(
+            raw["severity"], raw["severity"]
+        )
+        raw["status_label"] = self.STATUS_LABELS.get(raw["status"], raw["status"])
+        raw["detected_at_fmt"] = (
+            raw["detected_at"].strftime("%d/%m/%Y %H:%M") if raw["detected_at"] else "—"
+        )
+        raw["decided_at_fmt"] = (
+            raw["decided_at"].strftime("%d/%m/%Y %H:%M") if raw["decided_at"] else None
+        )
+        raw["score_fmt"] = (
+            f"{raw['score']:+.2f}" if raw["score"] is not None else "—"
+        )
+        transitions = self._STATUS_TRANSITIONS.get(raw["status"], ())
+        raw["available_transitions"] = [
+            {"key": t, "label": self.STATUS_LABELS.get(t, t)} for t in transitions
+        ]
+        raw["is_terminal"] = not bool(transitions)
+        return raw
+
+    async def transition_desvio(
+        self,
+        finding_id: str,
+        *,
+        new_status: str,
+        decision_reason: str | None,
+        decided_by_user_id: str | None,
+    ) -> tuple[bool, str | None]:
+        """Aplica transição de status no analytic_finding. Mesma máquina
+        de estados do reconciliation_finding via _STATUS_TRANSITIONS."""
+        current = await self.repo.get_analytic_finding(finding_id)
+        if current is None:
+            return False, "desvio não encontrado"
+        allowed = self._STATUS_TRANSITIONS.get(current["status"], ())
+        if new_status not in allowed:
+            return False, (
+                f"transição inválida: {current['status']} → {new_status}. "
+                f"Permitidas: {', '.join(allowed) or '(nenhuma — estado terminal)'}"
+            )
+        ok = await self.repo.update_analytic_finding_status(
+            finding_id,
+            new_status=new_status,
+            decision_reason=decision_reason,
+            decided_by_user_id=decided_by_user_id,
+        )
+        return ok, (None if ok else "atualização falhou")
+
     # =========================================================== Detalhe finding (Bloco F)
 
     # Workflow estados → transições permitidas. Source-of-truth do HITL.
