@@ -698,6 +698,163 @@ async def payments_empreiteiras_wf_extracao_jobs_partial(
     )
 
 
+@router.get(
+    "/payments/empreiteiras-wf/contratos/extracao/{job_id}",
+    response_class=HTMLResponse,
+)
+async def payments_empreiteiras_wf_extracao_detalhe(
+    job_id: str,
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+):
+    """Detalhe HITL de 1 extraction_job — campos editáveis + aprovar/rejeitar."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.extraction.service import (
+        PaymentsExtractionService,
+    )
+
+    try:
+        job_uuid = __import__("uuid").UUID(job_id)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "job_id inválido") from exc
+
+    svc = PaymentsExtractionService()
+    job = await svc.get_job_detail(job_uuid)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "job não encontrado")
+
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/extracao_detalhe.html",
+        await _ctx(
+            request, user,
+            active_module="empreiteiras_wf_extracao",
+            job=job,
+        ),
+    )
+
+
+@router.post("/payments/empreiteiras-wf/contratos/extracao/{job_id}/approve")
+async def payments_empreiteiras_wf_extracao_approve(
+    job_id: str,
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+    empreiteira_nome: str = Form(""),
+    empreiteira_cnpj: str = Form(""),
+    contratante_cnpj: str = Form(""),
+    objeto_contrato: str = Form(""),
+    categoria: str = Form(""),
+    tecnologia: str = Form(""),
+    atividade: str = Form(""),
+    uf: str = Form(""),
+    cidade: str = Form(""),
+    val_fix_cab: str = Form(""),
+    valid_from: str = Form(""),
+    valid_to: str = Form(""),
+):
+    """Aprova um extraction_job — materializa ContractMaster + Version."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from datetime import date
+    from decimal import Decimal, InvalidOperation
+
+    from app.core.services.payments.extraction.service import (
+        PaymentsExtractionService,
+    )
+
+    try:
+        job_uuid = __import__("uuid").UUID(job_id)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "job_id inválido") from exc
+
+    def _parse_date(v: str) -> date | None:
+        v = v.strip()
+        if not v:
+            return None
+        try:
+            return date.fromisoformat(v)
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, f"data inválida: {v!r}"
+            ) from exc
+
+    def _parse_decimal(v: str) -> Decimal | None:
+        v = v.strip()
+        if not v:
+            return None
+        try:
+            return Decimal(v.replace(",", "."))
+        except InvalidOperation as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, f"decimal inválido: {v!r}"
+            ) from exc
+
+    edited = {
+        "empreiteira_nome": empreiteira_nome.strip() or None,
+        "empreiteira_cnpj": empreiteira_cnpj.strip() or None,
+        "contratante_cnpj": contratante_cnpj.strip() or None,
+        "objeto_contrato": objeto_contrato.strip() or None,
+        "categoria": categoria.strip() or None,
+        "tecnologia": tecnologia.strip() or None,
+        "atividade": atividade.strip() or None,
+        "uf": [s.strip() for s in uf.split(",") if s.strip()],
+        "cidade": [s.strip() for s in cidade.split(",") if s.strip()],
+        "val_fix_cab": _parse_decimal(val_fix_cab),
+        "valid_from": _parse_date(valid_from),
+        "valid_to": _parse_date(valid_to),
+    }
+
+    svc = PaymentsExtractionService()
+    try:
+        await svc.approve_job(
+            job_uuid, edited_fields=edited, approved_by_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return RedirectResponse(
+        f"/payments/empreiteiras-wf/contratos/extracao/{job_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/payments/empreiteiras-wf/contratos/extracao/{job_id}/reject")
+async def payments_empreiteiras_wf_extracao_reject(
+    job_id: str,
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+    reason: str = Form(""),
+):
+    """Rejeita um extraction_job — marca como FAILED."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.extraction.service import (
+        PaymentsExtractionService,
+    )
+
+    try:
+        job_uuid = __import__("uuid").UUID(job_id)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "job_id inválido") from exc
+
+    svc = PaymentsExtractionService()
+    try:
+        await svc.reject_job(job_uuid, reason=reason, rejected_by_id=user.id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return RedirectResponse(
+        f"/payments/empreiteiras-wf/contratos/extracao/{job_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @router.get("/payments/empreiteiras-wf/ingestao", response_class=HTMLResponse)
 async def payments_empreiteiras_wf_ingestao_page(
     request: Request,

@@ -435,3 +435,323 @@ async def test_nav_left_shows_extracao_entry_under_pagamentos():
     body = resp.text
     assert "Extração PDF" in body
     assert 'href="/payments/empreiteiras-wf/contratos/extracao"' in body
+
+
+# ---------------------------------------------------------------------------
+# Bloco B — HITL detalhe + approve/reject + acceptance E2E
+# ---------------------------------------------------------------------------
+
+
+async def _seed_job_in_review(
+    *, user_id: UUID, fields: ExtractedContractFields, tmp_path
+) -> UUID:
+    """Helper que cria um job e o leva até status='review' via process."""
+    from app.adapters.storage.filesystem_document_store import (
+        FilesystemDocumentStore,
+    )
+    from app.core.services.payments.extraction import service as svc_mod
+
+    store = FilesystemDocumentStore(root=tmp_path)
+    client = MockExtractionClient(result_fields=fields)
+    svc = PaymentsExtractionService(document_store=store, llm_client=client)
+
+    # Monkeypatch direto via attr (sem fixture monkeypatch aqui — usamos
+    # autospec do builtin).
+    original_text = svc_mod._pdf_to_text
+    svc_mod._pdf_to_text = lambda b: "TEXTO EXTRAIDO"
+    try:
+        # Stub do send pra evitar Redis.
+        from app.workers import payments_extraction
+        original_send = payments_extraction.extract_pdf.send
+        payments_extraction.extract_pdf.send = (
+            lambda *a, **kw: type("Msg", (), {"message_id": "x"})()
+        )
+        try:
+            job_id = await svc.queue_upload(
+                pdf_bytes=_fake_pdf_bytes(), filename="seed.pdf",
+                uploaded_by_id=user_id,
+            )
+            await svc.process(job_id)
+        finally:
+            payments_extraction.extract_pdf.send = original_send
+    finally:
+        svc_mod._pdf_to_text = original_text
+    return job_id
+
+
+@pytest.mark.asyncio
+async def test_get_job_detail_after_process_returns_extracted_fields(
+    _schema, tmp_path, monkeypatch
+):
+    user_id = await _create_user("ext_det", "senha-123", roles=["controladoria"])
+    fields = ExtractedContractFields(
+        empreiteira_nome="ACME LTDA",
+        empreiteira_cnpj="11222333000144",
+        categoria="FIXO MENSAL",
+        val_fix_cab=Decimal("12345.67"),
+        valid_from=date(2025, 1, 1),
+        valid_to=date(2025, 12, 31),
+        uf=["SP", "RJ"],
+    )
+    job_id = await _seed_job_in_review(user_id=user_id, fields=fields, tmp_path=tmp_path)
+
+    svc = PaymentsExtractionService()
+    detail = await svc.get_job_detail(job_id)
+    assert detail["status"] == "review"
+    assert detail["extracted_fields"]["empreiteira_nome"] == "ACME LTDA"
+    assert detail["extracted_fields"]["uf"] == ["SP", "RJ"]
+    assert detail["confidence_per_field"]["empreiteira_nome"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_approve_job_creates_contract_master_and_version(
+    _schema, tmp_path
+):
+    from app.adapters.db.repositories.payments.contract_repos import (
+        PgContractMasterRepository, PgContractVersionRepository,
+    )
+
+    user_id = await _create_user("ext_app", "senha-123", roles=["controladoria"])
+    fields = ExtractedContractFields(
+        empreiteira_nome="ACME LTDA",
+        empreiteira_cnpj="11222333000144",
+        categoria="FIXO MENSAL",
+        val_fix_cab=Decimal("10000"),
+        valid_from=date(2025, 1, 1),
+        valid_to=date(2025, 12, 31),
+        uf=["SP"],
+    )
+    job_id = await _seed_job_in_review(user_id=user_id, fields=fields, tmp_path=tmp_path)
+
+    svc = PaymentsExtractionService()
+    cm_id = await svc.approve_job(
+        job_id,
+        edited_fields=fields.model_dump(mode="json"),
+        approved_by_id=user_id,
+    )
+    assert isinstance(cm_id, UUID)
+
+    # Job marcado como APPROVED.
+    detail = await svc.get_job_detail(job_id)
+    assert detail["status"] == "approved"
+
+    # ContractMaster criado.
+    cm = await PgContractMasterRepository().get(cm_id)
+    assert cm is not None
+    assert cm.cnpj == "11222333000144"
+    assert cm.is_monitored is True
+
+    # ContractVersion criada com val_fix_cab.
+    versions = await PgContractVersionRepository().list_for_master(cm_id)
+    assert len(versions) == 1
+    v = versions[0]
+    assert v.val_fix_cab == Decimal("10000")
+    assert v.uf == ["SP"]
+    assert v.extracted_by_llm_model == "mock-sabia-4"
+
+
+@pytest.mark.asyncio
+async def test_approve_job_rejects_without_cnpj(_schema, tmp_path):
+    user_id = await _create_user("ext_nocnpj", "senha-123", roles=["controladoria"])
+    fields = ExtractedContractFields(empreiteira_nome="X")  # sem cnpj
+    job_id = await _seed_job_in_review(user_id=user_id, fields=fields, tmp_path=tmp_path)
+
+    svc = PaymentsExtractionService()
+    with pytest.raises(ValueError, match="empreiteira_cnpj"):
+        await svc.approve_job(
+            job_id,
+            edited_fields=fields.model_dump(mode="json"),
+            approved_by_id=user_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_approve_job_rejects_wrong_status(_schema, tmp_path, monkeypatch):
+    """Job em PENDING não pode ser aprovado direto — só REVIEW."""
+    from app.workers import payments_extraction
+    monkeypatch.setattr(
+        payments_extraction.extract_pdf, "send",
+        lambda *a, **kw: type("Msg", (), {"message_id": "x"})(),
+    )
+
+    user_id = await _create_user("ext_ws", "senha-123", roles=["controladoria"])
+    svc = _make_service(tmp_path)
+    job_id = await svc.queue_upload(
+        pdf_bytes=_fake_pdf_bytes(), filename="x.pdf", uploaded_by_id=user_id,
+    )
+    # Job está PENDING (não processou).
+    with pytest.raises(ValueError, match="esperado 'review'"):
+        await svc.approve_job(
+            job_id,
+            edited_fields={"empreiteira_cnpj": "11222333000144"},
+            approved_by_id=user_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_reject_job_marks_failed_with_reason(_schema, tmp_path):
+    user_id = await _create_user("ext_rj", "senha-123", roles=["controladoria"])
+    fields = ExtractedContractFields(empreiteira_nome="X", empreiteira_cnpj="11222333000144")
+    job_id = await _seed_job_in_review(user_id=user_id, fields=fields, tmp_path=tmp_path)
+
+    svc = PaymentsExtractionService()
+    await svc.reject_job(job_id, reason="PDF ilegível", rejected_by_id=user_id)
+
+    detail = await svc.get_job_detail(job_id)
+    assert detail["status"] == "failed"
+    assert "PDF ilegível" in detail["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_detalhe_route_renders_form_for_review(_schema, tmp_path):
+    """Job em status=review renderiza form editável + botão Aprovar."""
+    from app.main import app
+
+    user_id = await _create_user("ext_d2", "senha-123", roles=["controladoria"])
+    fields = ExtractedContractFields(
+        empreiteira_nome="ACME LTDA",
+        empreiteira_cnpj="11222333000144",
+        categoria="FIXO MENSAL",
+    )
+    job_id = await _seed_job_in_review(user_id=user_id, fields=fields, tmp_path=tmp_path)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ext_d2", "senha-123")
+        resp = await client.get(
+            f"/payments/empreiteiras-wf/contratos/extracao/{job_id}"
+        )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "ACME LTDA" in body
+    assert "11222333000144" in body
+    assert "FIXO MENSAL" in body
+    # Form editável.
+    assert "Aprovar e materializar" in body
+    assert "Rejeitar" in body
+
+
+@pytest.mark.asyncio
+async def test_detalhe_route_404_for_unknown():
+    from app.main import app
+
+    await _create_user("ext_404", "senha-123", roles=["controladoria"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ext_404", "senha-123")
+        resp = await client.get(
+            "/payments/empreiteiras-wf/contratos/extracao/00000000-0000-0000-0000-000000000000"
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_approve_route_303_creates_contract(_schema, tmp_path):
+    """E2E acceptance: GET detalhe → POST approve → status=approved + CM."""
+    from app.adapters.db.repositories.payments.contract_repos import (
+        PgContractMasterRepository,
+    )
+    from app.main import app
+
+    user_id = await _create_user("ext_e2e", "senha-e2e-123", roles=["controladoria"])
+    fields = ExtractedContractFields(
+        empreiteira_nome="ACME LTDA",
+        empreiteira_cnpj="11222333000144",
+        categoria="FIXO MENSAL",
+        val_fix_cab=Decimal("10000"),
+        valid_from=date(2025, 1, 1),
+        valid_to=date(2025, 12, 31),
+        uf=["SP"],
+    )
+    job_id = await _seed_job_in_review(user_id=user_id, fields=fields, tmp_path=tmp_path)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ext_e2e", "senha-e2e-123")
+        # 1. GET detalhe → form editável
+        resp = await client.get(
+            f"/payments/empreiteiras-wf/contratos/extracao/{job_id}"
+        )
+        assert resp.status_code == 200
+        assert "Aprovar e materializar" in resp.text
+
+        # 2. POST approve com os campos
+        resp = await client.post(
+            f"/payments/empreiteiras-wf/contratos/extracao/{job_id}/approve",
+            data={
+                "empreiteira_nome": "ACME LTDA",
+                "empreiteira_cnpj": "11222333000144",
+                "categoria": "FIXO MENSAL",
+                "val_fix_cab": "10000.00",
+                "valid_from": "2025-01-01",
+                "valid_to": "2025-12-31",
+                "uf": "SP",
+                "cidade": "",
+                "tecnologia": "", "atividade": "",
+                "contratante_cnpj": "", "objeto_contrato": "",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+
+        # 3. Segue redirect → status agora é approved
+        resp = await client.get(resp.headers["location"])
+        body = resp.text
+        assert "Job aprovado" in body
+        # Form não-editável (readonly).
+        assert "Aprovar e materializar" not in body
+
+    # ContractMaster criado.
+    async with __import__("app.adapters.db.postgres_payments", fromlist=["connect_payments"]).connect_payments() as c:
+        row = await c.fetchrow(
+            "SELECT id FROM payments.contract_master WHERE cnpj = $1",
+            "11222333000144",
+        )
+        assert row is not None
+
+
+@pytest.mark.asyncio
+async def test_reject_route_303_marks_failed(_schema, tmp_path):
+    from app.main import app
+
+    user_id = await _create_user("ext_re", "senha-123", roles=["controladoria"])
+    fields = ExtractedContractFields(empreiteira_nome="X", empreiteira_cnpj="11222333000144")
+    job_id = await _seed_job_in_review(user_id=user_id, fields=fields, tmp_path=tmp_path)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ext_re", "senha-123")
+        resp = await client.post(
+            f"/payments/empreiteiras-wf/contratos/extracao/{job_id}/reject",
+            data={"reason": "OCR ruim"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        resp = await client.get(resp.headers["location"])
+        body = resp.text
+        assert "Job falhou" in body
+        assert "OCR ruim" in body
+
+
+@pytest.mark.asyncio
+async def test_approve_route_400_for_invalid_date(_schema, tmp_path):
+    from app.main import app
+
+    user_id = await _create_user("ext_bad", "senha-123", roles=["controladoria"])
+    fields = ExtractedContractFields(empreiteira_nome="X", empreiteira_cnpj="11222333000144")
+    job_id = await _seed_job_in_review(user_id=user_id, fields=fields, tmp_path=tmp_path)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login_as(client, "ext_bad", "senha-123")
+        resp = await client.post(
+            f"/payments/empreiteiras-wf/contratos/extracao/{job_id}/approve",
+            data={
+                "empreiteira_cnpj": "11222333000144",
+                "valid_from": "abc-xyz",  # data inválida
+                "valid_to": "", "val_fix_cab": "", "uf": "", "cidade": "",
+                "empreiteira_nome": "", "categoria": "", "tecnologia": "",
+                "atividade": "", "contratante_cnpj": "", "objeto_contrato": "",
+            },
+        )
+    assert resp.status_code == 400

@@ -233,6 +233,169 @@ class PaymentsExtractionService:
             "extraction_finished_at": row["extraction_finished_at"],
         }
 
+    # =================================================== Workflow HITL (Bloco B)
+
+    async def approve_job(
+        self,
+        job_id: UUID,
+        *,
+        edited_fields: dict[str, Any],
+        approved_by_id: UUID,
+    ) -> UUID:
+        """Aprova um job em status='review' — materializa em
+        ContractMaster + ContractVersion. Retorna contract_master_id.
+
+        Lógica:
+          1. Busca o job. Falha se não estiver em 'review'.
+          2. Resolve empreiteira via supplier_bridge.get_by_cnpj — se já
+             existe, reusa contract_master existente (cria nova version).
+             Se não, cria supplier + master + version do zero.
+          3. Vincula extraction_job.contract_master_id + status='approved'.
+
+        `edited_fields` aceita os mesmos campos de ExtractedContractFields
+        (validação Pydantic — fail-fast se shape errado).
+        """
+        from app.adapters.db.repositories.payments.contract_repos import (
+            PgContractMasterRepository,
+            PgContractVersionRepository,
+            PgSupplierBridgeRepository,
+        )
+        from app.core.domain.payments import (
+            ContractMaster,
+            ContractVersion,
+            SupplierBridge,
+        )
+        from app.core.services.payments.extraction.schemas import (
+            ExtractedContractFields,
+        )
+
+        job = await self.jobs_repo.get(job_id)
+        if job is None:
+            raise ValueError(f"job {job_id} não encontrado")
+        if job.status != ExtractionStatus.REVIEW:
+            raise ValueError(
+                f"job {job_id} em status {job.status.value!r}, esperado 'review'"
+            )
+
+        # Valida campos via Pydantic — re-shape do dict editado.
+        fields = ExtractedContractFields(**edited_fields)
+        if not fields.empreiteira_cnpj:
+            raise ValueError("empreiteira_cnpj é obrigatório para aprovar")
+
+        sb_repo = PgSupplierBridgeRepository()
+        cm_repo = PgContractMasterRepository()
+        cv_repo = PgContractVersionRepository()
+
+        # Resolve supplier — se há ao menos 1 com mesmo CNPJ, reusa contrato.
+        existing_suppliers = await sb_repo.get_by_cnpj(fields.empreiteira_cnpj)
+        supplier_id: UUID
+        contract_master_id: UUID
+
+        if existing_suppliers:
+            supplier_id = existing_suppliers[0].id
+            # Verifica se já existe contract_master pra esse supplier — busca
+            # via contrato_num_sap (placeholder neste fluxo) ou força criação
+            # de novo master por supplier. Para MVP: 1 master por supplier
+            # via primeiro hit de supplier; se cm existir, reusa.
+            sb = existing_suppliers[0]
+            cm = await cm_repo.get_by_contrato(sb.contrato_num_sap)
+            if cm:
+                contract_master_id = cm.id
+            else:
+                cm_new = ContractMaster(
+                    supplier_bridge_id=supplier_id,
+                    contrato_num_sap=sb.contrato_num_sap,
+                    ref_ws=sb.ref_ws,
+                    cnpj=fields.empreiteira_cnpj,
+                    is_monitored=True,
+                    created_by_id=approved_by_id,
+                )
+                await cm_repo.create(cm_new)
+                contract_master_id = cm_new.id
+        else:
+            # Supplier inédito: precisa de contrato_num_sap + ref_ws fictícios.
+            # Convenção: contrato_num_sap = "EXT-<job_id_short>",
+            # ref_ws = "EXT-<job_id_short>" — UI HITL pode editar depois.
+            short = str(job_id)[:8]
+            sb_new = SupplierBridge(
+                categoria=fields.categoria or "EXTRAIDO",
+                empreiteira=fields.empreiteira_nome or "DESCONHECIDA",
+                contrato_num_sap=f"EXT-{short}",
+                ref_ws=f"EXT-{short}",
+                numero_fornecedor_sap=f"EXT{short}",
+                cnpj=fields.empreiteira_cnpj,
+            )
+            await sb_repo.bulk_upsert([sb_new])
+            supplier_id = sb_new.id
+            cm_new = ContractMaster(
+                supplier_bridge_id=supplier_id,
+                contrato_num_sap=sb_new.contrato_num_sap,
+                ref_ws=sb_new.ref_ws,
+                cnpj=fields.empreiteira_cnpj,
+                is_monitored=True,
+                created_by_id=approved_by_id,
+            )
+            await cm_repo.create(cm_new)
+            contract_master_id = cm_new.id
+
+        # Cria nova ContractVersion sempre — version_number = N+1.
+        existing_versions = await cv_repo.list_for_master(contract_master_id)
+        next_version = (
+            max((v.version_number for v in existing_versions), default=0) + 1
+        )
+        cv = ContractVersion(
+            contract_master_id=contract_master_id,
+            version_number=next_version,
+            valid_from=fields.valid_from or datetime.utcnow().date(),
+            valid_to=fields.valid_to or datetime.utcnow().date(),
+            val_fix_cab=fields.val_fix_cab,
+            objeto_contrato=fields.objeto_contrato,
+            tecnologia=fields.tecnologia,
+            atividade=fields.atividade,
+            uf=fields.uf or [],
+            cidade=fields.cidade or [],
+            extracted_by_llm_model=job.llm_model_used,
+            extracted_cost_brl=job.cost_brl,
+            reviewed_by_id=approved_by_id,
+            reviewed_at=datetime.utcnow(),
+        )
+        await cv_repo.create(cv)
+        await cm_repo.set_current_version(contract_master_id, cv.id)
+
+        # Marca job como approved e vincula o contract_master.
+        async with connect_payments() as c:
+            await c.execute(
+                """
+                UPDATE payments.extraction_job
+                SET status = $1, contract_master_id = $2
+                WHERE id = $3
+                """,
+                ExtractionStatus.APPROVED.value, contract_master_id, job_id,
+            )
+
+        return contract_master_id
+
+    async def reject_job(
+        self,
+        job_id: UUID,
+        *,
+        reason: str,
+        rejected_by_id: UUID,
+    ) -> None:
+        """Rejeita um job em status='review' — marca como FAILED com
+        error_message contendo o motivo + user."""
+        job = await self.jobs_repo.get(job_id)
+        if job is None:
+            raise ValueError(f"job {job_id} não encontrado")
+        if job.status != ExtractionStatus.REVIEW:
+            raise ValueError(
+                f"job {job_id} em status {job.status.value!r}, esperado 'review'"
+            )
+        msg = f"rejeitado por {rejected_by_id}: {reason.strip() or '(sem motivo)'}"[:500]
+        await self.jobs_repo.update_status(
+            job_id, status=ExtractionStatus.FAILED, error_message=msg,
+        )
+
     @staticmethod
     def _serialize_job(row) -> dict[str, Any]:
         return {
