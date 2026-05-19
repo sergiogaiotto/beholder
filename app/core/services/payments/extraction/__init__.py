@@ -20,6 +20,10 @@ from app.core.services.payments.extraction._client import (
     LLMExtractionClient,
     MockExtractionClient,
 )
+from app.core.services.payments.extraction._maritaca import (
+    MaritacaExtractionClient,
+    build_maritaca_client_or_none,
+)
 from app.core.services.payments.extraction.schemas import (
     ExtractedContractFields,
     ExtractedLPUItem,
@@ -30,5 +34,7 @@ __all__ = [
     "ExtractedLPUItem",
     "ExtractionResult",
     "LLMExtractionClient",
+    "MaritacaExtractionClient",
     "MockExtractionClient",
+    "build_maritaca_client_or_none",
 ]
