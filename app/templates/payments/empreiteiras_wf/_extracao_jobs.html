@@ -1,0 +1,62 @@
+{#
+  Partial da tabela de extraction_job. Auto-polling 3s enquanto houver
+  jobs em pending/extracting; trigger some quando todos forem terminais.
+#}
+{% set has_active = jobs | selectattr('status', 'in', ['pending', 'extracting']) | list | length > 0 %}
+<div id="extracao-jobs"
+     {% if has_active %}
+     hx-get="/payments/empreiteiras-wf/contratos/extracao/jobs"
+     hx-trigger="every 3s"
+     hx-swap="outerHTML"
+     {% endif %}>
+  <table class="w-full text-sm">
+    <thead class="text-[11px] uppercase tracking-wider text-neutral-500 bg-neutral-50">
+      <tr>
+        <th class="text-left py-2 px-3 font-medium">Recebido</th>
+        <th class="text-left py-2 px-3 font-medium">PDF</th>
+        <th class="text-left py-2 px-3 font-medium">Status</th>
+        <th class="text-left py-2 px-3 font-medium">Modelo</th>
+        <th class="text-right py-2 px-3 font-medium">Custo</th>
+        <th class="text-left py-2 px-3 font-medium">Concluído</th>
+        <th class="py-2 px-3"></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for j in jobs %}
+      {% set st_class = {
+        'pending':    'bg-neutral-100 text-neutral-700',
+        'extracting': 'bg-ai-50 text-ai-800',
+        'review':     'bg-amber-50 text-amber-800',
+        'approved':   'bg-brand-50 text-brand-800',
+        'failed':     'bg-risk-50 text-risk-800',
+      }.get(j.status, 'bg-neutral-100 text-neutral-700') %}
+      <tr class="border-t border-neutral-100 hover:bg-neutral-50/50">
+        <td class="py-2 px-3 text-neutral-600 font-mono text-[11px]">{{ j.created_at_fmt }}</td>
+        <td class="py-2 px-3 font-medium truncate max-w-[260px]" title="{{ j.pdf_filename }}">
+          {{ j.pdf_filename }}
+        </td>
+        <td class="py-2 px-3">
+          <span class="text-[10px] px-1.5 py-0.5 rounded {{ st_class }}">{{ j.status_label }}</span>
+        </td>
+        <td class="py-2 px-3 text-neutral-600 font-mono text-[11px]">{{ j.llm_model_used }}</td>
+        <td class="py-2 px-3 text-right font-mono text-xs">{{ j.cost_brl_fmt }}</td>
+        <td class="py-2 px-3 text-neutral-600 font-mono text-[11px]">{{ j.finished_at_fmt }}</td>
+        <td class="py-2 px-3 text-right">
+          {% if j.status in ('review', 'approved', 'failed') %}
+            <a href="/payments/empreiteiras-wf/contratos/extracao/{{ j.id }}"
+               class="text-[11px] text-brand-700 hover:underline whitespace-nowrap">
+              Revisar →
+            </a>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr>
+        <td colspan="7" class="text-center py-10 text-neutral-400 italic">
+          nenhuma extração ainda — suba um PDF acima pra começar.
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>

@@ -612,6 +612,92 @@ async def payments_empreiteiras_wf_alertas_page(
     )
 
 
+@router.get("/payments/empreiteiras-wf/contratos/extracao", response_class=HTMLResponse)
+async def payments_empreiteiras_wf_extracao_page(
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+):
+    """Tela de extração de PDFs de contrato (Fase 4)."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.extraction.service import (
+        PaymentsExtractionService,
+    )
+
+    svc = PaymentsExtractionService()
+    jobs = await svc.list_recent_jobs(limit=30)
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/extracao.html",
+        await _ctx(
+            request, user,
+            active_module="empreiteiras_wf_extracao",
+            jobs=jobs,
+        ),
+    )
+
+
+@router.post("/payments/empreiteiras-wf/contratos/extracao/upload")
+async def payments_empreiteiras_wf_extracao_upload(
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+    file: UploadFile = File(...),
+):
+    """POST upload de PDF — cria ExtractionJob(PENDING) e despacha actor."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.extraction.service import (
+        PaymentsExtractionService,
+    )
+
+    pdf_bytes = await file.read()
+    if not pdf_bytes:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "arquivo vazio")
+
+    svc = PaymentsExtractionService()
+    try:
+        job_id = await svc.queue_upload(
+            pdf_bytes=pdf_bytes,
+            filename=file.filename or "contrato.pdf",
+            uploaded_by_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return RedirectResponse(
+        f"/payments/empreiteiras-wf/contratos/extracao?just_uploaded={job_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get(
+    "/payments/empreiteiras-wf/contratos/extracao/jobs",
+    response_class=HTMLResponse,
+)
+async def payments_empreiteiras_wf_extracao_jobs_partial(
+    request: Request,
+    user: User | None = Depends(current_user_optional),
+):
+    """Partial HTMX da tabela de jobs — refresh sem full reload."""
+    if not user:
+        return RedirectResponse("/login")
+    _require_any_role(user, ['admin', 'supervisor', 'controladoria'])
+
+    from app.core.services.payments.extraction.service import (
+        PaymentsExtractionService,
+    )
+
+    svc = PaymentsExtractionService()
+    jobs = await svc.list_recent_jobs(limit=30)
+    return templates.TemplateResponse(
+        "payments/empreiteiras_wf/_extracao_jobs.html",
+        {"request": request, "jobs": jobs},
+    )
+
+
 @router.get("/payments/empreiteiras-wf/ingestao", response_class=HTMLResponse)
 async def payments_empreiteiras_wf_ingestao_page(
     request: Request,
