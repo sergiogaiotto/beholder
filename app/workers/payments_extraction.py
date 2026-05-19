@@ -37,11 +37,15 @@ def extract_pdf(job_id: str) -> None:
 
 
 async def _run(job_id_str: str) -> None:
+    from app.core.services.payments.extraction._maritaca import (
+        build_maritaca_client_or_none,
+    )
     from app.core.services.payments.extraction.service import (
         PaymentsExtractionService,
     )
 
-    # Em prod, instanciar com Maritaca client. Aqui usa default (Mock) —
-    # mantemos isolado: prod ativa via env config no service constructor.
-    svc = PaymentsExtractionService()
+    # Maritaca real se MARITACA_API_KEY existe, senão Mock (dev/CI). A
+    # factory loga a decisão e nunca explode no construtor.
+    llm = build_maritaca_client_or_none()
+    svc = PaymentsExtractionService(llm_client=llm)
     await svc.process(UUID(job_id_str))

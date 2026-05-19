@@ -55,7 +55,12 @@ _SEED_PATH = Path(__file__).parent / "seed.sql"
 # `connect()`. Único por processo — uvicorn `--workers N` cria N pools
 # independentes (intencional para isolamento de connection lifetime).
 _pool: asyncpg.Pool | None = None
-_pool_lock = asyncio.Lock()
+# threading.Lock (não asyncio.Lock) — sobrevive entre event loops criados/
+# fechados por `asyncio.run` em workers dramatiq. Ver postgres_payments.py
+# para a justificativa completa.
+import threading as _threading  # noqa: E402
+
+_pool_lock = _threading.Lock()
 
 
 def _decode_timestamptz(value: str) -> _dt.datetime:
@@ -120,14 +125,34 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
     await conn.execute("SET TIME ZONE 'UTC'")
 
 
+def _pool_is_bound_to_current_loop(pool: asyncpg.Pool) -> bool:
+    """Detecta pool órfão de loop morto — ver postgres_payments.py."""
+    pool_loop = getattr(pool, "_loop", None)
+    if pool_loop is None or pool_loop.is_closed():
+        return False
+    try:
+        current = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return pool_loop is current
+
+
 async def get_pool() -> asyncpg.Pool:
-    """Retorna o pool global, inicializando-o sob lock se necessário."""
+    """Retorna o pool global, inicializando-o sob lock se necessário.
+
+    Recria o pool quando o atual está ligado a um loop fechado/diferente —
+    cenário do worker dramatiq (asyncio.run cria/fecha loop por job).
+    """
     global _pool
-    if _pool is not None:
+    if _pool is not None and _pool_is_bound_to_current_loop(_pool):
         return _pool
-    async with _pool_lock:
-        if _pool is not None:  # outro coroutine inicializou enquanto esperávamos
+    _pool_lock.acquire()
+    try:
+        if _pool is not None and _pool_is_bound_to_current_loop(_pool):
             return _pool
+        if _pool is not None:
+            # Pool órfão — descarta sem await (close() do loop morto trava).
+            _pool = None
         # Reload settings at pool creation time (see module-level note).
         s = get_settings()
         _pool = await asyncpg.create_pool(
@@ -140,6 +165,8 @@ async def get_pool() -> asyncpg.Pool:
             init=_init_connection,
         )
         return _pool
+    finally:
+        _pool_lock.release()
 
 
 def pool() -> asyncpg.Pool:

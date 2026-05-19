@@ -31,6 +31,7 @@ import asyncio
 import datetime as _dt
 import json
 import re
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,12 @@ from app.config import get_settings
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 _pool: asyncpg.Pool | None = None
-_pool_lock = asyncio.Lock()
+# threading.Lock (não asyncio.Lock) para sobreviver a múltiplos event loops —
+# o worker dramatiq cria/fecha um loop por job, asyncio.Lock fica órfão do
+# primeiro loop e levanta `bound to a different event loop` nas chamadas
+# seguintes. threading.Lock independe de loop e serializa criação concorrente
+# de pool entre threads do worker (4) sem custo perceptível (~ns por acquire).
+_pool_lock = threading.Lock()
 
 
 def _decode_timestamptz(value: str) -> _dt.datetime:
@@ -118,14 +124,46 @@ async def _setup_connection(conn: asyncpg.Connection) -> None:
         await conn.execute(f"SET search_path TO {new_sp}")
 
 
+def _pool_is_bound_to_current_loop(pool: asyncpg.Pool) -> bool:
+    """Detecta pool órfão de loop morto.
+
+    asyncpg.Pool fica ligado ao event loop em que foi criado. Quando esse
+    loop fecha (asyncio.run termina), o pool fica órfão — qualquer uso em
+    outro loop dá `RuntimeError: Event loop is closed`. Esse é o cenário
+    do worker dramatiq: cada actor chama asyncio.run, que cria/fecha um
+    loop por job. Sem essa checagem, o 2º job do worker falha sempre.
+    """
+    pool_loop = getattr(pool, "_loop", None)
+    if pool_loop is None or pool_loop.is_closed():
+        return False
+    try:
+        current = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return pool_loop is current
+
+
 async def get_payments_pool() -> asyncpg.Pool:
-    """Retorna pool dedicado de payments. Inicializa sob lock se ainda não existir."""
+    """Retorna pool dedicado de payments. Inicializa sob lock se ainda não existir.
+
+    Recria o pool quando ele está ligado a um loop fechado/diferente — ver
+    `_pool_is_bound_to_current_loop`. Custo: criação de pool nova ~50ms,
+    aceitável por job dramatiq (raríssimo em prod web).
+    """
     global _pool
-    if _pool is not None:
+    if _pool is not None and _pool_is_bound_to_current_loop(_pool):
         return _pool
-    async with _pool_lock:
-        if _pool is not None:
+    # threading.Lock (sync) — não usa await. A region crítica é apenas
+    # a criação do Pool; o `await asyncpg.create_pool` roda fora.
+    _pool_lock.acquire()
+    try:
+        if _pool is not None and _pool_is_bound_to_current_loop(_pool):
             return _pool
+        if _pool is not None:
+            # Pool órfão de outro loop. close() pode falhar; engolimos e
+            # liberamos o slot pra criar pool novo. Não usamos await aqui
+            # pra evitar suspender o lock — orfãos são GC-recolhidos.
+            _pool = None
         s = get_settings()
         _pool = await asyncpg.create_pool(
             dsn=s.pg_dsn,                                  # mesmo banco do generic
@@ -138,6 +176,8 @@ async def get_payments_pool() -> asyncpg.Pool:
             setup=_setup_connection,                       # roda em cada checkout
         )
         return _pool
+    finally:
+        _pool_lock.release()
 
 
 def connect_payments():

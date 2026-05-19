@@ -15,4 +15,8 @@ from app.adapters.queue import dramatiq_setup  # noqa: F401
 
 # Importação de módulos com actors — cada import registra os @dramatiq.actor
 # no broker. Ordem não importa, mas listar explicitamente facilita auditoria.
+# Sem esses imports, o dramatiq CLI (`dramatiq app.workers`) não descobre
+# os actors e despacha mensagens caem em ActorNotFound → DLQ.
 from app.workers import healthcheck  # noqa: F401, E402
+from app.workers import payments_ingest  # noqa: F401, E402
+from app.workers import payments_extraction  # noqa: F401, E402
